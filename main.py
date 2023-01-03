@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 from PIL import Image, ImageTk
 from tkinter import ttk, filedialog
 import cv2
@@ -21,7 +23,6 @@ class YoloV5InteractiveViewer:
         self.left_sidebar = ttk.Frame(mainframe)
         self.left_sidebar.grid(column=0, row=0, sticky=tkinter.NS + tkinter.W)
         self.left_sidebar["borderwidth"] = 1
-        self.file_list = tkinter.Listbox(self.left_sidebar, height=10)
 
         self.image_view = tkinter.Canvas(mainframe)
         self.image_view.grid(column=1, row=0, sticky=tkinter.NSEW)
@@ -40,7 +41,9 @@ class YoloV5InteractiveViewer:
         self.tk_image = None  # need to alive
         self.model = None
         self.pil_image = None
-        self.image_filename = "test.png"  # TODO: dynamic load from file_list
+        self.realpathes = []
+        self.image_index = 0
+        self.file_list = None
 
         self.configure_left_sidebar()
         self.configure_right_sidebar()
@@ -50,7 +53,15 @@ class YoloV5InteractiveViewer:
             self.left_sidebar, text="Load Folder", command=self.load_folder
         )
         folder_button.pack()
+
+        def update_index(e):
+            select = e.widget.curselection()
+            self.image_index = select[0]
+            self.run_detect()
+
+        self.file_list = tkinter.Listbox(self.left_sidebar, height=10)
         self.file_list.pack()
+        self.file_list.bind("<<ListboxSelect>>", update_index)
 
     def configure_right_sidebar(self):
         fit_button = ttk.Button(
@@ -89,23 +100,29 @@ class YoloV5InteractiveViewer:
     def load_folder(self):
         folder = filedialog.askdirectory()
         images = []
+        self.realpathes = []
         for f in os.listdir(folder):
             ext = os.path.splitext(f)[1]
             valid_image_ext = [".jpg", ".jpeg", ".png"]
             if ext.lower() in valid_image_ext:
-                images.append(os.path.join(folder, f))
+                realpath = os.path.join(folder, f)
+                self.realpathes.append(realpath)
+                images.append(f)
 
-        # TODO: associate list item with file and allow to open
         tk_imagelist = tkinter.StringVar(value=images)
-        self.file_list["listvariable"] = tk_imagelist
+        if self.file_list is not None:
+            self.file_list["listvariable"] = tk_imagelist
 
     def run_detect(self):
-        if self.model is not None:
-            print(f"Run detect for {self.image_filename}")
-            cv2_image = cv2.imread(self.image_filename)
+        if self.model is not None and self.image_index < len(self.realpathes):
+            filename = self.realpathes[self.image_index]
+            print(f"Run detect for {filename}")
+            cv2_image = cv2.imread(filename)
+            cv2.cvtColor(cv2_image, cv2.COLOR_BGR2RGB, dst=cv2_image)
             detected = self.model(cv2_image, size=1280)
             rendered = detected.render()[0]
             self.pil_image = Image.fromarray(rendered)
+            self.fit_image()
 
 
 print("Initializing...")
