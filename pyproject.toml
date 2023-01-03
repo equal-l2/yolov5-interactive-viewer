@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "yolov5-interactive-viewer"
+version = "0.1.0"
+description = ""
+authors = ["equal-l2 <eng.equall2@gmail.com>"]
+readme = "README.md"
+packages = [{include = "yolov5_interactive_viewer"}]
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.11" # torch (needed by yolov5) is not supported on 3.11
+pillow = "^9.3.0"
+opencv-python = "^4.6.0.66"
+yolov5 = "^7.0.6"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
