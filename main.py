@@ -170,32 +170,38 @@ class YoloV5InteractiveViewer:
         self.bb_config = LineConfigs(
             parent, text="Bounding Boxes", color="#FF0000", width=2
         )
+
+        # hide outside of bounds
+        self.hide_thres = tkinter.DoubleVar()
+        scale = tkinter.Scale(
+            self.bb_config,
+            from_=0,
+            to=1.0,
+            resolution=0.01,
+            label="Min overlap %",
+            orient=tkinter.HORIZONTAL,
+            variable=self.hide_thres,
+        )
+        scale.set(0.6)
+        scale.pack()
+
+        self.show_confidence = tkinter.BooleanVar()
+        ttk.Checkbutton(
+            self.bb_config, text="Show confidence", variable=self.show_confidence
+        ).pack()
+
         self.bounds_config = LineConfigs(
             parent, text="Upper/Lower Bounds", color="#00FF00", width=1
         )
         self.bb_config.pack()
         self.bounds_config.pack()
 
-        self.upper_pixel = IntEntry(
-            self.bounds_config, label="Upper Bound Px", init=287
-        )
-        self.lower_pixel = IntEntry(
-            self.bounds_config, label="Lower Bound Px", init=1000
-        )
+        self.upper_pixel = IntEntry(self.bounds_config, label="Up Px", init=287)
+        self.lower_pixel = IntEntry(self.bounds_config, label="Lo Px", init=850)
         self.upper_pixel.pack()
         self.lower_pixel.pack()
 
         ttk.Button(parent, text="Run Detection", command=self.run_detect).pack()
-
-        # "Advanced" settings
-        self.use_yolo_render = tkinter.BooleanVar()
-        self.use_yolo_render.trace_add("write", self.handle_own_renderer_checkbutton)
-        ttk.Checkbutton(
-            parent, text="Use YOLOv5-pip renderer", variable=self.use_yolo_render
-        ).pack()
-
-        self.show_label = tkinter.BooleanVar()
-        ttk.Checkbutton(parent, text="Show label", variable=self.show_label).pack()
 
     def handle_own_renderer_checkbutton(self, *_):
         # enable / disable all control associated with the own renderer
@@ -240,17 +246,21 @@ class YoloV5InteractiveViewer:
 
         # get all images in the folder
         images = []
-        self.realpathes = []
         for f in os.listdir(folder):
             ext = os.path.splitext(f)[1]
             valid_image_ext = [".jpg", ".jpeg", ".png"]
             if ext.lower() in valid_image_ext:
                 realpath = os.path.join(folder, f)
-                self.realpathes.append(realpath)
-                images.append(f)
+                images.append((f, realpath))
+
+        # sort files by name
+        images.sort(key=lambda y: y[0])
+
+        image_names = [name for (name, _) in images]
+        self.realpathes = [realpath for (_, realpath) in images]
 
         # populate file list
-        tk_imagelist = tkinter.StringVar(value=images)
+        tk_imagelist = tkinter.StringVar(value=image_names)
         if self.file_list is not None:
             self.file_list["listvariable"] = tk_imagelist
 
@@ -278,13 +288,6 @@ class YoloV5InteractiveViewer:
             )
             return None
 
-        confidence = self.confidence.get()
-        if confidence == 0:
-            messagebox.showerror(
-                message="Confidence == 0 will result in castrophe, stopping"
-            )
-            return None
-
         upper_pixel = self.upper_pixel.get()
         if upper_pixel is None:
             messagebox.showerror(
@@ -303,7 +306,6 @@ class YoloV5InteractiveViewer:
         return (
             self.model,
             filename,
-            confidence,
             bb_params,
             bounds_params,
             lower_pixel,
@@ -317,37 +319,45 @@ class YoloV5InteractiveViewer:
         (
             model,
             filename,
-            confidence,
             bb_params,
             bounds_params,
             lower_pixel,
             upper_pixel,
         ) = params
 
-        show_label = self.show_label.get()
-        print(
-            f"Run detect for {filename} with confidence {confidence} and label is {show_label}"
-        )
-
         cv2_image = cv2.imread(filename)
         cv2.cvtColor(cv2_image, cv2.COLOR_BGR2RGB, dst=cv2_image)
 
+        model.conf = self.confidence.get()
         detected = model(cv2_image, size=1280)
 
-        if self.use_yolo_render.get():
-            rendered = detected.render(labels=show_label)[0]
-            self.pil_image = Image.fromarray(rendered)
-        else:
-            values = detected.pandas().xyxy[0]
+        values = detected.pandas().xyxy[0]
 
-            # coords in dataframe are float, so they need to be cast into int
-            # (because cv2 accepts int coords only)
-            values.round(0)
-            values = values.astype({"xmin": int, "ymin": int, "xmax": int, "ymax": int})
+        # coords in dataframe are float, so they need to be cast into int
+        # (because cv2 accepts int coords only)
+        values.round(0)
+        values = values.astype({"xmin": int, "ymin": int, "xmax": int, "ymax": int})
 
-            # draw bounding boxes
-            (bb_color, bb_width) = bb_params
-            for row in values.itertuples():
+        bounds = [(0, upper_pixel), (cv2_image.shape[1], lower_pixel)]
+
+        # draw bounding boxes
+        (bb_color, bb_width) = bb_params
+        for row in values.itertuples():
+            bb = [(row.xmin, row.ymin), (row.xmax, row.ymax)]
+            bb_area = (row.xmax - row.xmin) * (row.ymax - row.ymin)
+
+            # compute the area of intersection
+            max_of_x_min = max(bounds[0][0], bb[0][0])
+            max_of_y_min = max(bounds[0][1], bb[0][1])
+            min_of_x_max = min(bounds[1][0], bb[1][0])
+            min_of_y_max = min(bounds[1][1], bb[1][1])
+            w = min_of_x_max - max_of_x_min
+            h = min_of_y_max - max_of_y_min
+            intersect = w * h if w > 0 and h > 0 else 0
+
+            intersect_ratio = intersect / bb_area
+
+            if intersect_ratio >= self.hide_thres.get():
                 cv2.rectangle(
                     cv2_image,
                     (row.xmin, row.ymin),
@@ -355,26 +365,28 @@ class YoloV5InteractiveViewer:
                     bb_color,
                     bb_width,
                 )
+                if self.show_confidence.get():
+                    cv2.putText(
+                        cv2_image,
+                        text=f"{row.confidence:.2f}",
+                        org=(row.xmin, row.ymin - 10),
+                        fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                        fontScale=0.5,
+                        color=(255, 0, 0),  # red
+                        thickness=2,
+                    )
 
-            # draw bounds line
-            (bounds_color, bounds_width) = bounds_params
-            cv2.line(
-                cv2_image,
-                (0, upper_pixel),
-                (cv2_image.shape[1], upper_pixel),
-                bounds_color,
-                bounds_width,
-            )
+        # draw bound rectangle
+        (bounds_color, bounds_width) = bounds_params
+        cv2.rectangle(
+            cv2_image,
+            (0, upper_pixel),
+            (cv2_image.shape[1], lower_pixel),
+            bounds_color,
+            bounds_width,
+        )
 
-            cv2.line(
-                cv2_image,
-                (0, lower_pixel),
-                (cv2_image.shape[1], lower_pixel),
-                bounds_color,
-                bounds_width,
-            )
-
-            self.pil_image = Image.fromarray(cv2_image)
+        self.pil_image = Image.fromarray(cv2_image)
 
         self.fit_image()
 
