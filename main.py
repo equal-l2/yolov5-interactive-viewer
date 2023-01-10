@@ -19,7 +19,6 @@ LOWER_BOUND_DEFAULT = 850
 BOUNDS_COLOR_DEFAULT = "#00FF00"  # green
 BBOXES_COLOR_DEFAULT = "#FF0000"  # red
 OUTSIDER_COLOR_DEFAULT = "#9900FF"  # purple
-MASK_OVERLAY_COLOR_DEFAULT = "#0000FF"  # blue
 
 # TODO: make configurable
 TEXT_COLOR = (255, 0, 0)  # red
@@ -65,8 +64,8 @@ class IntEntry(ttk.Frame):
                 return val
             else:
                 return None
-        except Exception as e:
-            print(e)
+        except:
+            traceback.print_exc()
             return None
 
     def set(self, val: int):
@@ -218,6 +217,10 @@ class YoloV5InteractiveViewer:
             self.outsider_config, label="Min overlap %", init=OUTSIDE_THRES_DEFAULT
         )
         self.outsider_thres.pack()
+        self.hide_outsiders = tkinter.BooleanVar()
+        ttk.Checkbutton(
+            self.outsider_config, text="Hide outsiders", variable=self.hide_outsiders
+        ).pack()
         self.outsider_config.pack()
 
         # mask settings
@@ -235,11 +238,6 @@ class YoloV5InteractiveViewer:
         self.mask_name = ttk.Label(load_mask_frame)
         self.mask_name.pack(side=tkinter.LEFT)
         load_mask_frame.pack()
-
-        self.mask_color = ColorPicker(
-            mask_frame, color=MASK_OVERLAY_COLOR_DEFAULT, text="Overlay color"
-        )
-        self.mask_color.pack()
 
         mask_frame.pack()
 
@@ -336,16 +334,14 @@ class YoloV5InteractiveViewer:
         if self.file_list is not None:
             self.file_list["listvariable"] = tk_imagelist
 
-    def ensure_detect_params(self):
-        if self.model is None:
-            messagebox.showerror(message="Model is not loaded")
-            return None
-
+    def get_realpath(self):
         if self.image_index >= len(self.realpathes):
             # logic error (not because of users)
             # usually occurs when no image is loaded
             return None
+        return self.realpathes[self.image_index]
 
+    def ensure_detect_params(self):
         bb_params = self.bb_config.get()
         if bb_params is None:
             messagebox.showerror(
@@ -381,10 +377,7 @@ class YoloV5InteractiveViewer:
             )
             return None
 
-        filename = self.realpathes[self.image_index]
         return (
-            self.model,
-            filename,
             bb_params,
             outsider_params,
             bounds_params,
@@ -393,21 +386,45 @@ class YoloV5InteractiveViewer:
         )
 
     def run_detect(self):
+        if self.model is None:
+            messagebox.showerror(message="Model is not loaded")
+            return
+
+        filename = self.get_realpath()
+        if filename is None:
+            print("filename is None")
+            return
+
+        self.cv2_image = cv2.imread(filename)
+        cv2.cvtColor(self.cv2_image, cv2.COLOR_BGR2RGB, dst=self.cv2_image)
+
+        self.model.conf = self.confidence.get()  # type: ignore (mismatch between float and Tensor | Module)
+        detected = self.model(self.cv2_image, size=1280)
+
+        values = detected.pandas().xyxy[0]
+
+        # coords in dataframe are float, so they need to be cast into int
+        # (because cv2 accepts int coords only)
+        values.round(0)
+        values = values.astype({"xmin": int, "ymin": int, "xmax": int, "ymax": int})
+
+        self.values = values
+        self.render_result()
+
+    def render_result(self):
+        if self.values is None:
+            return
+
         params = self.ensure_detect_params()
         if params is None:
             return
         (
-            model,
-            filename,
             bb_params,
             outsider_params,
             bounds_params,
             lower_pixel,
             upper_pixel,
         ) = params
-
-        cv2_image = cv2.imread(filename)
-        cv2.cvtColor(cv2_image, cv2.COLOR_BGR2RGB, dst=cv2_image)
 
         # check mask
         enable_mask = self.enable_mask.get()
@@ -417,30 +434,35 @@ class YoloV5InteractiveViewer:
                 return
 
             mask_dim = self.mask.shape[0:2]
-            image_dim = cv2_image.shape[0:2]
+            image_dim = self.cv2_image.shape[0:2]
             if mask_dim != image_dim:
                 messagebox.showerror(
                     message=f"Dimension mismatch\nInput:{image_dim}\nMask:{mask_dim}"
                 )
                 return
 
-        model.conf = self.confidence.get()  # type: ignore (mismatch between float and Tensor | Module)
-        detected = model(cv2_image, size=1280)
+        cv2_image_copy = self.cv2_image.copy()
 
-        values = detected.pandas().xyxy[0]
+        # draw filename
+        filename = self.get_realpath()
+        if filename is None:
+            filename = "ERROR: NO NAME"
 
-        # coords in dataframe are float, so they need to be cast into int
-        # (because cv2 accepts int coords only)
-        values.round(0)
-        values = values.astype({"xmin": int, "ymin": int, "xmax": int, "ymax": int})
+        cv2.putText(
+            cv2_image_copy,
+            text=os.path.basename(filename),
+            org=(10, cv2_image_copy.shape[0] - 20),
+            fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+            fontScale=1,
+            color=TEXT_COLOR,
+            thickness=2,
+        )
 
-        bounds = [(0, upper_pixel), (cv2_image.shape[1], lower_pixel)]
-
-        # draw bounding boxes
-        # TODO: change color interactively (without re-running detection)
+        # draw bounding boxes and bounds
         (bb_color, bb_width) = bb_params
         (outsider_color, outsider_width) = outsider_params
-        for row in values.itertuples():
+        bounds = [(0, upper_pixel), (self.cv2_image.shape[1], lower_pixel)]
+        for row in self.values.itertuples():
             bb_area = (row.xmax - row.xmin) * (row.ymax - row.ymin)
 
             if bb_area <= 0:
@@ -466,14 +488,13 @@ class YoloV5InteractiveViewer:
                 is_outsider = True
 
             # handle mask
-            # TODO: overlay mask
             if enable_mask:
                 if self.mask is None:
                     # this should never happen
                     messagebox.showerror(message="Internal error: Mask is None")
                     return
 
-                mask_cropped = self.mask[row.xmin : row.xmax][row.ymin : row.ymax]
+                mask_cropped = self.mask[row.ymin : row.ymax, row.xmin : row.xmax]
                 whites = numpy.sum(mask_cropped == 255)
                 mask_intersect_ratio = whites / bb_area
                 if mask_intersect_ratio < outsider_thres:
@@ -482,46 +503,38 @@ class YoloV5InteractiveViewer:
             box_color = outsider_color if is_outsider else bb_color
             box_width = outsider_width if is_outsider else bb_width
 
-            cv2.rectangle(
-                cv2_image,
-                (row.xmin, row.ymin),
-                (row.xmax, row.ymax),
-                box_color,
-                box_width,
-            )
-            if self.show_confidence.get():
-                cv2.putText(
-                    cv2_image,
-                    text=f"{row.confidence:.2f}",
-                    org=(row.xmin, row.ymin - 10),
-                    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                    fontScale=0.5,
-                    color=TEXT_COLOR,
-                    thickness=2,
+            hide_detect = self.hide_outsiders.get() and is_outsider
+
+            if not hide_detect:
+                cv2.rectangle(
+                    cv2_image_copy,
+                    (row.xmin, row.ymin),
+                    (row.xmax, row.ymax),
+                    box_color,
+                    box_width,
                 )
+                if self.show_confidence.get():
+                    cv2.putText(
+                        cv2_image_copy,
+                        text=f"{row.confidence:.2f}",
+                        org=(row.xmin, row.ymin - 10),
+                        fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                        fontScale=0.5,
+                        color=TEXT_COLOR,
+                        thickness=2,
+                    )
 
         # draw bound rectangle
         (bounds_color, bounds_width) = bounds_params
         cv2.rectangle(
-            cv2_image,
+            cv2_image_copy,
             (0, upper_pixel),
-            (cv2_image.shape[1], lower_pixel),
+            (cv2_image_copy.shape[1], lower_pixel),
             bounds_color,
             bounds_width,
         )
 
-        # draw filename
-        cv2.putText(
-            cv2_image,
-            text=os.path.basename(filename),
-            org=(10, cv2_image.shape[0] - 20),
-            fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-            fontScale=1,
-            color=TEXT_COLOR,
-            thickness=2,
-        )
-
-        self.pil_image = Image.fromarray(cv2_image)
+        self.pil_image = Image.fromarray(cv2_image_copy)
 
         self.fit_image()
 
