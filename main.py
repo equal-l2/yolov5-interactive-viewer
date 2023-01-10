@@ -6,6 +6,21 @@ import cv2
 import os
 import tkinter
 import yolov5
+import traceback
+
+CONFIDENCE_DEFAULT = 0.25  # the default value from YOLOv5 detect.py
+
+OUTSIDE_THRES_DEFAULT = 0.7
+UPPER_BOUND_DEFAULT = 287
+LOWER_BOUND_DEFAULT = 850
+
+BOUNDS_COLOR_DEFAULT = "#00FF00"  # green
+BBOXES_COLOR_DEFAULT = "#FF0000"  # red
+OUTSIDER_COLOR_DEFAULT = "#9900FF"  # purple
+MASK_OVERLAY_COLOR_DEFAULT = "#0000FF"  # blue
+
+# TODO: make configurable
+TEXT_COLOR = (255, 0, 0)  # red
 
 
 class LineConfigs(ttk.LabelFrame):
@@ -15,28 +30,15 @@ class LineConfigs(ttk.LabelFrame):
         self.width_entry = IntEntry(self, label="Line width", init=width)
         self.width_entry.pack()
 
-        color_frame = ttk.Frame(self)
-        color_frame.pack()
-        self.color = color
-        ttk.Label(color_frame, text="Line color").pack(side=tkinter.LEFT)
-        ttk.Button(color_frame, text="Choose...", command=self.choose_line_color).pack(
-            side=tkinter.LEFT
-        )
-        self.color_label = tkinter.Label(color_frame, text="     ", bg=self.color)
-        self.color_label.pack(side=tkinter.LEFT)
-
-    def choose_line_color(self):
-        colors = colorchooser.askcolor()
-        if colors is not None and colors[1] is not None:
-            self.color = colors[1]
-            self.color_label["bg"] = self.color
+        self.colorpicker = ColorPicker(self, text="Line color", color=color)
+        self.colorpicker.pack()
 
     def get(self):
         width = self.width_entry.get()
         if width is None:
             return None
         else:
-            return (ImageColor.getrgb(self.color), width)
+            return (self.colorpicker.get(), width)
 
 
 class IntEntry(ttk.Frame):
@@ -69,11 +71,46 @@ class IntEntry(ttk.Frame):
         self.value.set(str(val))
 
 
+class ColorPicker(ttk.Frame):
+    def __init__(self, root, text: str, color: str):
+        ttk.Frame.__init__(self, root)
+
+        ImageColor.getrgb(color)  # test the color is valid
+
+        self.color = color
+        ttk.Label(self, text=text).pack(side=tkinter.LEFT)
+        ttk.Button(self, text="Choose...", command=self.choose_line_color).pack(
+            side=tkinter.LEFT
+        )
+        self.color_label = tkinter.Label(self, text="     ", bg=self.color)
+        self.color_label.pack(side=tkinter.LEFT)
+
+    def choose_line_color(self):
+        colors = colorchooser.askcolor()
+        if colors is not None and colors[1] is not None:
+            self.color = colors[1]
+            self.color_label["bg"] = self.color
+
+    def get(self):
+        return ImageColor.getrgb(self.color)
+
+
+class ZeroToOneScale(tkinter.Scale):
+    def __init__(self, root, label: str, init: float):
+        tkinter.Scale.__init__(
+            self,
+            root,
+            from_=0,
+            to=1.0,
+            resolution=0.01,
+            label=label,
+            orient=tkinter.HORIZONTAL,
+        )
+        self.set(init)
+
+
 class YoloV5InteractiveViewer:
     def __init__(self, root):
-        root.geometry("1600x600")
-        root.title("YOLOv5 Interactive Viewer")
-
         mainframe = ttk.Frame(root)
         mainframe.grid(column=0, row=0, sticky=tkinter.NSEW)
         # configureしないと伸びない
@@ -97,7 +134,7 @@ class YoloV5InteractiveViewer:
         mainframe.columnconfigure(1, weight=10)
         mainframe.rowconfigure(0, weight=1)
 
-        self.tk_image = None  # need to alive
+        self.tk_image = None  # need to be alive
         self.model = None
         self.pil_image = None
         self.realpathes = []
@@ -139,7 +176,12 @@ class YoloV5InteractiveViewer:
             # canceled
             return
 
-        self.pil_image.save(real_new_name)
+        try:
+            self.pil_image.save(real_new_name)
+            messagebox.showinfo(message=f"Successfully saved to {real_new_name}")
+        except:
+            traceback.print_exc()
+            messagebox.showinfo(message=f"Failed to save to {real_new_name}")
 
     def configure_right_sidebar(self):
         parent = self.right_sidebar
@@ -148,56 +190,70 @@ class YoloV5InteractiveViewer:
         model_frame = ttk.Frame(parent)
         model_frame.pack()
 
-        ttk.Button(model_frame, text="Open model", command=self.load_model).pack(
+        ttk.Button(model_frame, text="Load model", command=self.load_model).pack(
             side=tkinter.LEFT
         )
         self.model_name = ttk.Label(model_frame)
         self.model_name.pack(side=tkinter.LEFT)
 
-        self.confidence = tkinter.DoubleVar()
-        scale = tkinter.Scale(
-            parent,
-            from_=0,
-            to=1.0,
-            resolution=0.01,
-            label="Confidence",
-            orient=tkinter.HORIZONTAL,
-            variable=self.confidence,
+        self.confidence = ZeroToOneScale(
+            parent, label="Confidence", init=CONFIDENCE_DEFAULT
         )
-        scale.set(0.25)  # the default value from YOLOv5 detect.py
-        scale.pack()
+        self.confidence.pack()
 
         self.bb_config = LineConfigs(
-            parent, text="Bounding Boxes", color="#FF0000", width=2
+            parent, text="Bounding Boxes", color=BBOXES_COLOR_DEFAULT, width=2
         )
-
-        # hide outside of bounds
-        self.hide_thres = tkinter.DoubleVar()
-        scale = tkinter.Scale(
-            self.bb_config,
-            from_=0,
-            to=1.0,
-            resolution=0.01,
-            label="Min overlap %",
-            orient=tkinter.HORIZONTAL,
-            variable=self.hide_thres,
-        )
-        scale.set(0.6)
-        scale.pack()
-
         self.show_confidence = tkinter.BooleanVar()
         ttk.Checkbutton(
             self.bb_config, text="Show confidence", variable=self.show_confidence
         ).pack()
+        self.bb_config.pack()
+
+        # mark outside of bounds
+        self.outsider_config = LineConfigs(
+            parent, text="Outsiders", color=OUTSIDER_COLOR_DEFAULT, width=2
+        )
+        self.outsider_thres = ZeroToOneScale(
+            self.outsider_config, label="Min overlap %", init=OUTSIDE_THRES_DEFAULT
+        )
+        self.outsider_thres.pack()
+        self.outsider_config.pack()
+
+        # mask settings
+        mask_frame = ttk.LabelFrame(parent, text="Mask")
+
+        self.apply_mask = tkinter.BooleanVar()
+        ttk.Checkbutton(
+            mask_frame, text="Apply mask as postprocess", variable=self.apply_mask
+        ).pack()
+
+        load_mask_frame = ttk.Frame(mask_frame)
+        ttk.Button(load_mask_frame, text="Load mask", command=self.load_mask).pack(
+            side=tkinter.LEFT
+        )
+        self.mask_name = ttk.Label(load_mask_frame)
+        self.mask_name.pack(side=tkinter.LEFT)
+        load_mask_frame.pack()
+
+        self.mask_color = ColorPicker(
+            mask_frame, color=MASK_OVERLAY_COLOR_DEFAULT, text="Overlay color"
+        )
+        self.mask_color.pack()
+
+        mask_frame.pack()
 
         self.bounds_config = LineConfigs(
-            parent, text="Upper/Lower Bounds", color="#00FF00", width=1
+            parent, text="Upper/Lower Bounds", color=BOUNDS_COLOR_DEFAULT, width=1
         )
-        self.bb_config.pack()
         self.bounds_config.pack()
 
-        self.upper_pixel = IntEntry(self.bounds_config, label="Up Px", init=287)
-        self.lower_pixel = IntEntry(self.bounds_config, label="Lo Px", init=850)
+        self.upper_pixel = IntEntry(
+            self.bounds_config, label="Up Px", init=UPPER_BOUND_DEFAULT
+        )
+        self.lower_pixel = IntEntry(
+            self.bounds_config, label="Lo Px", init=LOWER_BOUND_DEFAULT
+        )
         self.upper_pixel.pack()
         self.lower_pixel.pack()
 
@@ -224,15 +280,31 @@ class YoloV5InteractiveViewer:
             # canceled
             return
 
-        print(f"Load {filename}")
+        print(f"Load model {filename}")
         try:
             self.model = yolov5.load(filename)
-        except Exception as e:
-            messagebox.showerror(message=f"Failed to load the model: {e}")
+        except:
+            traceback.print_exc()
+            messagebox.showerror(message=f"Failed to load the model")
             return
 
         self.model_name["text"] = os.path.basename(filename)
-        self.run_detect()
+
+    def load_mask(self):
+        filename = filedialog.askopenfilename(title="Choose Mask")
+        if filename == "":
+            # canceled
+            return
+
+        print(f"Load mask {filename}")
+        mask = cv2.imread(filename)
+        if mask is None:
+            traceback.print_exc()
+            messagebox.showerror(message=f"Failed to load the mask")
+            return
+
+        self.mask = mask
+        self.mask_name["text"] = os.path.basename(filename)
 
     def load_folder(self):
         if self.model is None:
@@ -281,6 +353,13 @@ class YoloV5InteractiveViewer:
             )
             return None
 
+        outsider_params = self.outsider_config.get()
+        if outsider_params is None:
+            messagebox.showerror(
+                message="Outsiders: Line width must be a positive interger"
+            )
+            return None
+
         bounds_params = self.bounds_config.get()
         if bounds_params is None:
             messagebox.showerror(
@@ -307,6 +386,7 @@ class YoloV5InteractiveViewer:
             self.model,
             filename,
             bb_params,
+            outsider_params,
             bounds_params,
             lower_pixel,
             upper_pixel,
@@ -320,6 +400,7 @@ class YoloV5InteractiveViewer:
             model,
             filename,
             bb_params,
+            outsider_params,
             bounds_params,
             lower_pixel,
             upper_pixel,
@@ -342,7 +423,9 @@ class YoloV5InteractiveViewer:
 
         # draw bounding boxes
         (bb_color, bb_width) = bb_params
+        (outsider_color, outsider_width) = outsider_params
         for row in values.itertuples():
+            # TODO: handle mask
             bb = [(row.xmin, row.ymin), (row.xmax, row.ymax)]
             bb_area = (row.xmax - row.xmin) * (row.ymax - row.ymin)
 
@@ -357,24 +440,27 @@ class YoloV5InteractiveViewer:
 
             intersect_ratio = intersect / bb_area
 
-            if intersect_ratio >= self.hide_thres.get():
-                cv2.rectangle(
+            outsider_thres = self.outsider_thres.get()
+            box_color = outsider_color if intersect_ratio < outsider_thres else bb_color
+            box_width = outsider_width if intersect_ratio < outsider_thres else bb_width
+
+            cv2.rectangle(
+                cv2_image,
+                (row.xmin, row.ymin),
+                (row.xmax, row.ymax),
+                box_color,
+                box_width,
+            )
+            if self.show_confidence.get():
+                cv2.putText(
                     cv2_image,
-                    (row.xmin, row.ymin),
-                    (row.xmax, row.ymax),
-                    bb_color,
-                    bb_width,
+                    text=f"{row.confidence:.2f}",
+                    org=(row.xmin, row.ymin - 10),
+                    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                    fontScale=0.5,
+                    color=TEXT_COLOR,
+                    thickness=2,
                 )
-                if self.show_confidence.get():
-                    cv2.putText(
-                        cv2_image,
-                        text=f"{row.confidence:.2f}",
-                        org=(row.xmin, row.ymin - 10),
-                        fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                        fontScale=0.5,
-                        color=(255, 0, 0),  # red
-                        thickness=2,
-                    )
 
         # draw bound rectangle
         (bounds_color, bounds_width) = bounds_params
@@ -386,6 +472,17 @@ class YoloV5InteractiveViewer:
             bounds_width,
         )
 
+        # draw filename
+        cv2.putText(
+            cv2_image,
+            text=os.path.basename(filename),
+            org=(10, cv2_image.shape[0] - 20),
+            fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+            fontScale=1,
+            color=TEXT_COLOR,
+            thickness=2,
+        )
+
         self.pil_image = Image.fromarray(cv2_image)
 
         self.fit_image()
@@ -393,6 +490,9 @@ class YoloV5InteractiveViewer:
 
 print("Initializing...")
 root = tkinter.Tk()
+root.geometry("1600x800")
+root.title("YOLOv5 Interactive Viewer")
+
 view = YoloV5InteractiveViewer(root)
 print("Initialized")
 root.mainloop()
