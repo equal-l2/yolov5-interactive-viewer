@@ -11,6 +11,7 @@ python = ">=3.10,<3.11" # torch (needed by yolov5) is not supported on 3.11
 pillow = "^9.3.0"
 opencv-python = "^4.6.0.66"
 yolov5 = "^7.0.6"
+numpy = "^1.24.1"
 
 
 [build-system]

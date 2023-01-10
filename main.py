@@ -7,6 +7,8 @@ import os
 import tkinter
 import yolov5
 import traceback
+import typing
+import numpy
 
 CONFIDENCE_DEFAULT = 0.25  # the default value from YOLOv5 detect.py
 
@@ -24,7 +26,7 @@ TEXT_COLOR = (255, 0, 0)  # red
 
 
 class LineConfigs(ttk.LabelFrame):
-    def __init__(self, root, text: str, color: str, width: int):
+    def __init__(self, root: tkinter.Misc, text: str, color: str, width: int):
         ttk.LabelFrame.__init__(self, root, text=text)
 
         self.width_entry = IntEntry(self, label="Line width", init=width)
@@ -42,7 +44,7 @@ class LineConfigs(ttk.LabelFrame):
 
 
 class IntEntry(ttk.Frame):
-    def __init__(self, root, label: str, init: int):
+    def __init__(self, root: tkinter.Misc, label: str, init: int):
         ttk.Frame.__init__(self, root)
 
         self.value = tkinter.StringVar(value=str(init))
@@ -72,7 +74,7 @@ class IntEntry(ttk.Frame):
 
 
 class ColorPicker(ttk.Frame):
-    def __init__(self, root, text: str, color: str):
+    def __init__(self, root: tkinter.Misc, text: str, color: str):
         ttk.Frame.__init__(self, root)
 
         ImageColor.getrgb(color)  # test the color is valid
@@ -96,7 +98,7 @@ class ColorPicker(ttk.Frame):
 
 
 class ZeroToOneScale(tkinter.Scale):
-    def __init__(self, root, label: str, init: float):
+    def __init__(self, root: tkinter.Misc, label: str, init: float):
         tkinter.Scale.__init__(
             self,
             root,
@@ -110,12 +112,9 @@ class ZeroToOneScale(tkinter.Scale):
 
 
 class YoloV5InteractiveViewer:
-    def __init__(self, root):
+    def __init__(self, root: tkinter.Misc):
         mainframe = ttk.Frame(root)
         mainframe.grid(column=0, row=0, sticky=tkinter.NSEW)
-        # configureしないと伸びない
-        root.columnconfigure(0, weight=1)
-        root.rowconfigure(0, weight=1)
 
         # place widgets
         self.left_sidebar = ttk.Frame(mainframe)
@@ -137,9 +136,10 @@ class YoloV5InteractiveViewer:
         self.tk_image = None  # need to be alive
         self.model = None
         self.pil_image = None
-        self.realpathes = []
-        self.image_index = 0
+        self.realpathes: list[str] = []
+        self.image_index: int = 0
         self.file_list = None
+        self.mask = None
 
         self.configure_left_sidebar()
         self.configure_right_sidebar()
@@ -149,7 +149,7 @@ class YoloV5InteractiveViewer:
             self.left_sidebar, text="Load folder", command=self.load_folder
         ).pack()
 
-        def update_index(e):
+        def update_index(e: typing.Any):
             select = e.widget.curselection()
             if len(select) < 1:
                 return
@@ -223,9 +223,9 @@ class YoloV5InteractiveViewer:
         # mask settings
         mask_frame = ttk.LabelFrame(parent, text="Mask")
 
-        self.apply_mask = tkinter.BooleanVar()
+        self.enable_mask = tkinter.BooleanVar()
         ttk.Checkbutton(
-            mask_frame, text="Apply mask as postprocess", variable=self.apply_mask
+            mask_frame, text="Apply mask as postprocess", variable=self.enable_mask
         ).pack()
 
         load_mask_frame = ttk.Frame(mask_frame)
@@ -297,7 +297,7 @@ class YoloV5InteractiveViewer:
             return
 
         print(f"Load mask {filename}")
-        mask = cv2.imread(filename)
+        mask = cv2.imread(filename, cv2.IMREAD_GRAYSCALE)
         if mask is None:
             traceback.print_exc()
             messagebox.showerror(message=f"Failed to load the mask")
@@ -317,7 +317,7 @@ class YoloV5InteractiveViewer:
             return
 
         # get all images in the folder
-        images = []
+        images: list[tuple[str, str]] = []
         for f in os.listdir(folder):
             ext = os.path.splitext(f)[1]
             valid_image_ext = [".jpg", ".jpeg", ".png"]
@@ -332,7 +332,7 @@ class YoloV5InteractiveViewer:
         self.realpathes = [realpath for (_, realpath) in images]
 
         # populate file list
-        tk_imagelist = tkinter.StringVar(value=image_names)
+        tk_imagelist = tkinter.StringVar(value=image_names)  # type: ignore (mismatch between value and image_names)
         if self.file_list is not None:
             self.file_list["listvariable"] = tk_imagelist
 
@@ -409,7 +409,22 @@ class YoloV5InteractiveViewer:
         cv2_image = cv2.imread(filename)
         cv2.cvtColor(cv2_image, cv2.COLOR_BGR2RGB, dst=cv2_image)
 
-        model.conf = self.confidence.get()
+        # check mask
+        enable_mask = self.enable_mask.get()
+        if enable_mask:
+            if self.mask is None:
+                messagebox.showerror(message="Mask is not loaded")
+                return
+
+            mask_dim = self.mask.shape[0:2]
+            image_dim = cv2_image.shape[0:2]
+            if mask_dim != image_dim:
+                messagebox.showerror(
+                    message=f"Dimension mismatch\nInput:{image_dim}\nMask:{mask_dim}"
+                )
+                return
+
+        model.conf = self.confidence.get()  # type: ignore (mismatch between float and Tensor | Module)
         detected = model(cv2_image, size=1280)
 
         values = detected.pandas().xyxy[0]
@@ -422,14 +437,21 @@ class YoloV5InteractiveViewer:
         bounds = [(0, upper_pixel), (cv2_image.shape[1], lower_pixel)]
 
         # draw bounding boxes
+        # TODO: change color interactively (without re-running detection)
         (bb_color, bb_width) = bb_params
         (outsider_color, outsider_width) = outsider_params
         for row in values.itertuples():
-            # TODO: handle mask
-            bb = [(row.xmin, row.ymin), (row.xmax, row.ymax)]
             bb_area = (row.xmax - row.xmin) * (row.ymax - row.ymin)
 
+            if bb_area <= 0:
+                # not sure if this can happen
+                continue
+
+            outsider_thres = self.outsider_thres.get()
+            is_outsider = False
+
             # compute the area of intersection
+            bb = [(row.xmin, row.ymin), (row.xmax, row.ymax)]
             max_of_x_min = max(bounds[0][0], bb[0][0])
             max_of_y_min = max(bounds[0][1], bb[0][1])
             min_of_x_max = min(bounds[1][0], bb[1][0])
@@ -440,9 +462,25 @@ class YoloV5InteractiveViewer:
 
             intersect_ratio = intersect / bb_area
 
-            outsider_thres = self.outsider_thres.get()
-            box_color = outsider_color if intersect_ratio < outsider_thres else bb_color
-            box_width = outsider_width if intersect_ratio < outsider_thres else bb_width
+            if intersect_ratio < outsider_thres:
+                is_outsider = True
+
+            # handle mask
+            # TODO: overlay mask
+            if enable_mask:
+                if self.mask is None:
+                    # this should never happen
+                    messagebox.showerror(message="Internal error: Mask is None")
+                    return
+
+                mask_cropped = self.mask[row.xmin : row.xmax][row.ymin : row.ymax]
+                whites = numpy.sum(mask_cropped == 255)
+                mask_intersect_ratio = whites / bb_area
+                if mask_intersect_ratio < outsider_thres:
+                    is_outsider = True
+
+            box_color = outsider_color if is_outsider else bb_color
+            box_width = outsider_width if is_outsider else bb_width
 
             cv2.rectangle(
                 cv2_image,
@@ -492,6 +530,9 @@ print("Initializing...")
 root = tkinter.Tk()
 root.geometry("1600x800")
 root.title("YOLOv5 Interactive Viewer")
+# configureしないと伸びない
+root.columnconfigure(0, weight=1)
+root.rowconfigure(0, weight=1)
 
 view = YoloV5InteractiveViewer(root)
 print("Initialized")
