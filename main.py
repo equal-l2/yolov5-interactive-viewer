@@ -192,11 +192,40 @@ class YoloV5InteractiveViewer:
 
     def get_config(self) -> typing.Optional[AppConfig]:
         # check params
-        params = self.validate_params()
-        if params is None:
+        bb_params = self.bb_config.get()
+        if bb_params is None:
+            messagebox.showerror(
+                message="Bounding Boxes: Line width must be a positive interger"
+            )
             return None
 
-        (bb_params, outsider_params, bounds_params, upper_pixel, lower_pixel) = params
+        outsider_params = self.outsider_config.get()
+        if outsider_params is None:
+            messagebox.showerror(
+                message="Outsiders: Line width must be a positive interger"
+            )
+            return None
+
+        bounds_params = self.bounds_config.get()
+        if bounds_params is None:
+            messagebox.showerror(
+                message="Upper/Lower Bounds: Line width must be a positive interger"
+            )
+            return None
+
+        upper_pixel = self.upper_pixel.get()
+        if upper_pixel is None:
+            messagebox.showerror(
+                message="Upper Bounds: Pixel must be a positive interger"
+            )
+            return None
+
+        lower_pixel = self.lower_pixel.get()
+        if lower_pixel is None:
+            messagebox.showerror(
+                message="Lower Bounds: Pixel must be a positive interger"
+            )
+            return None
 
         return AppConfig(
             confidence=self.confidence.get(),
@@ -478,65 +507,22 @@ class YoloV5InteractiveViewer:
             print("filename is None")
             return
 
+        config = self.get_config()
+        if config is None:
+            return
+
         self.cv2_image = cv2.imread(filename)
         cv2.cvtColor(self.cv2_image, cv2.COLOR_BGR2RGB, dst=self.cv2_image)
 
-        values = logic.run_detect(
-            self.model, self.cv2_image, self.confidence.get(), self.iou.get()
-        )
+        values = logic.run_detect(self.model, self.cv2_image, config)
 
         self.values = values
         self.render_result()
-
-    def validate_params(self):
-        bb_params = self.bb_config.get()
-        if bb_params is None:
-            messagebox.showerror(
-                message="Bounding Boxes: Line width must be a positive interger"
-            )
-            return None
-
-        outsider_params = self.outsider_config.get()
-        if outsider_params is None:
-            messagebox.showerror(
-                message="Outsiders: Line width must be a positive interger"
-            )
-            return None
-
-        bounds_params = self.bounds_config.get()
-        if bounds_params is None:
-            messagebox.showerror(
-                message="Upper/Lower Bounds: Line width must be a positive interger"
-            )
-            return None
-
-        upper_pixel = self.upper_pixel.get()
-        if upper_pixel is None:
-            messagebox.showerror(
-                message="Upper Bounds: Pixel must be a positive interger"
-            )
-            return None
-
-        lower_pixel = self.lower_pixel.get()
-        if lower_pixel is None:
-            messagebox.showerror(
-                message="Lower Bounds: Pixel must be a positive interger"
-            )
-            return None
-
-        return (bb_params, outsider_params, bounds_params, upper_pixel, lower_pixel)
 
     def render_result(self):
         # check detect is done
         if self.values is None:
             return
-
-        # check params
-        params = self.validate_params()
-        if params is None:
-            return
-
-        (bb_params, outsider_params, bounds_params, upper_pixel, lower_pixel) = params
 
         # check mask
         enable_mask = self.enable_mask.get()
@@ -562,23 +548,18 @@ class YoloV5InteractiveViewer:
             else:
                 filename = os.path.basename(realpath)
 
+        config = self.get_config()
+        if config is None:
+            return
+
         image_copied = self.cv2_image.copy()
         logic.draw_result(
             values=self.values,
             cv2_image=image_copied,
             filename=filename,
-            bb_params=bb_params,
-            show_confidence=self.show_confidence.get(),
-            outsider_params=outsider_params,
-            outsider_thres=self.outsider_thres.get(),
-            hide_outsiders=self.hide_outsiders.get(),
-            bounds_params=bounds_params,
-            upper_pixel=upper_pixel,
-            lower_pixel=lower_pixel,
-            disable_bounds=self.disable_bounds.get(),
             mask=self.mask if enable_mask else None,
-            mask_thres=self.mask_thres.get(),
             text_color=consts.TEXT_COLOR,
+            config=config,
         )
 
         self.pil_image = Image.fromarray(image_copied)

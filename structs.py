@@ -1,4 +1,5 @@
 import typing
+
 from pydantic import BaseModel
 
 RgbTuple: typing.TypeAlias = tuple[int, int, int]

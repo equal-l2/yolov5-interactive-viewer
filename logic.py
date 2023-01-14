@@ -1,7 +1,7 @@
 import typing
 from typing import Optional, TypeAlias
 import cv2
-from structs import LineParam, RgbTuple
+from structs import LineParam, RgbTuple, AppConfig
 import numpy
 
 Cv2Image: TypeAlias = cv2.Mat
@@ -9,11 +9,9 @@ Model: TypeAlias = typing.Any
 DetectValues: TypeAlias = typing.Any
 
 
-def run_detect(
-    model: Model, cv2_image: Cv2Image, conf_thres: float, iou_thres: float
-) -> DetectValues:
-    model.conf = conf_thres
-    model.iou = iou_thres
+def run_detect(model: Model, cv2_image: Cv2Image, config: AppConfig) -> DetectValues:
+    model.conf = config.confidence
+    model.iou = config.iou
     detected = model(cv2_image, size=1280)
 
     values = detected.pandas().xyxy[0]
@@ -44,8 +42,38 @@ def compute_intersect(box1: BBoxXyxy, box2: BBoxXyxy) -> int:
 # cv2_image will be destructively changed
 # filename: if not None, the filename will be rendered on the image
 # mask: if not None, mask will be considered for bounding box elimination
+
+
 def draw_result(
-    *,
+    values: DetectValues,
+    cv2_image: Cv2Image,
+    filename: Optional[str],
+    mask: Optional[Cv2Image],
+    text_color: RgbTuple,
+    config: AppConfig,
+):
+    _draw_result(
+        values=values,
+        cv2_image=cv2_image,
+        filename=filename,
+        bb_params=LineParam(color=config.bb_color, width=config.bb_width),
+        show_confidence=config.show_confidence,
+        outsider_params=LineParam(
+            color=config.outsider_color, width=config.outsider_width
+        ),
+        outsider_thres=config.outsider_thres,
+        hide_outsiders=config.hide_outsiders,
+        bounds_params=LineParam(color=config.bounds_color, width=config.bounds_width),
+        upper_pixel=config.upper_pixel,
+        lower_pixel=config.lower_pixel,
+        disable_bounds=config.disable_bounds,
+        mask=mask,
+        mask_thres=config.mask_thres,
+        text_color=text_color,
+    )
+
+
+def _draw_result(
     values: DetectValues,
     cv2_image: Cv2Image,
     filename: Optional[str],
