@@ -2,30 +2,18 @@
 
 from PIL import Image, ImageTk, ImageColor
 from tkinter import ttk, filedialog, messagebox, colorchooser
-import cv2
+import json
 import os
 import tkinter
-import yolov5
 import traceback
 import typing
-import numpy
 
-# YOLOv5 parameters, from the default value in detect.py
-CONFIDENCE_DEFAULT = 0.25
-IOU_DEFAULT = 0.45
+import cv2
+import yolov5
 
-# our parameters
-OUTSIDE_THRES_DEFAULT = 0.7
-MASK_THRES_DEFAULT = OUTSIDE_THRES_DEFAULT
-UPPER_BOUND_DEFAULT = 287
-LOWER_BOUND_DEFAULT = 850
-
-BOUNDS_COLOR_DEFAULT = "#00FF00"  # green
-BBOXES_COLOR_DEFAULT = "#FF0000"  # red
-OUTSIDER_COLOR_DEFAULT = "#9900FF"  # purple
-
-# TODO: make configurable
-TEXT_COLOR = (255, 0, 0)  # red
+from structs import RgbTuple, LineParam, AppConfig
+import consts
+import logic
 
 
 class LineConfigs(ttk.LabelFrame):
@@ -43,7 +31,11 @@ class LineConfigs(ttk.LabelFrame):
         if width is None:
             return None
         else:
-            return (self.colorpicker.get(), width)
+            return LineParam(self.colorpicker.get(), width)
+
+    def set(self, color: str, width: int):
+        self.colorpicker.set(color)
+        self.width_entry.set(width)
 
 
 class IntEntry(ttk.Frame):
@@ -86,24 +78,30 @@ class ColorPicker(ttk.Frame):
     def __init__(self, root: tkinter.Misc, text: str, color: str):
         ttk.Frame.__init__(self, root)
 
-        ImageColor.getrgb(color)  # test the color is valid
-
-        self.color = color
         ttk.Label(self, text=text).pack(side=tkinter.LEFT)
         ttk.Button(self, text="Choose...", command=self.choose_line_color).pack(
             side=tkinter.LEFT
         )
-        self.color_label = tkinter.Label(self, text="     ", bg=self.color)
+        self.color_label = tkinter.Label(self, text="     ")
         self.color_label.pack(side=tkinter.LEFT)
+
+        self.set(color)
 
     def choose_line_color(self):
         colors = colorchooser.askcolor()
         if colors is not None and colors[1] is not None:
-            self.color = colors[1]
-            self.color_label["bg"] = self.color
+            self._set_color(colors[1])
 
-    def get(self):
-        return ImageColor.getrgb(self.color)
+    def _set_color(self, color: str):
+        self.color = color
+        self.color_label["bg"] = color
+
+    def get(self) -> RgbTuple:
+        return ImageColor.getrgb(self.color)[0:3]
+
+    def set(self, color: str):
+        ImageColor.getrgb(color)  # test the color is valid
+        self._set_color(color)
 
 
 class ZeroToOneScale(tkinter.Scale):
@@ -192,9 +190,96 @@ class YoloV5InteractiveViewer:
             traceback.print_exc()
             messagebox.showinfo(message=f"Failed to save to {real_new_name}")
 
+    def get_config(self) -> typing.Optional[AppConfig]:
+        # check params
+        params = self.validate_params()
+        if params is None:
+            return None
+
+        (bb_params, outsider_params, bounds_params, upper_pixel, lower_pixel) = params
+
+        return AppConfig(
+            confidence=self.confidence.get(),
+            iou=self.iou.get(),
+            bb_color=bb_params.color,
+            bb_width=bb_params.width,
+            show_confidence=self.show_confidence.get(),
+            outsider_color=outsider_params.color,
+            outsider_width=outsider_params.width,
+            outsider_thres=self.outsider_thres.get(),
+            hide_outsiders=self.hide_outsiders.get(),
+            bounds_color=bounds_params.color,
+            bounds_width=bounds_params.width,
+            upper_pixel=upper_pixel,
+            lower_pixel=lower_pixel,
+            disable_bounds=self.disable_bounds.get(),
+            mask_thres=self.mask_thres.get(),
+        )
+
+    def from_config(self, app_config: AppConfig):
+        self.confidence.set(app_config.confidence)
+        self.iou.set(app_config.iou)
+        self.bb_config.set(
+            color=logic.rgb2hex(app_config.bb_color), width=app_config.bb_width
+        )
+        self.show_confidence.set(app_config.show_confidence)
+        self.outsider_config.set(
+            color=logic.rgb2hex(app_config.outsider_color),
+            width=app_config.outsider_width,
+        )
+        self.outsider_thres.set(app_config.outsider_thres)
+        self.hide_outsiders.set(app_config.hide_outsiders)
+        self.bounds_config.set(
+            color=logic.rgb2hex(app_config.bounds_color),
+            width=app_config.bounds_width,
+        )
+        self.upper_pixel.set(app_config.upper_pixel)
+        self.lower_pixel.set(app_config.lower_pixel)
+        self.disable_bounds.set(app_config.disable_bounds)
+        self.mask_thres.set(app_config.mask_thres)
+
+    def export_config(self):
+        real_new_name = filedialog.asksaveasfilename(initialfile="config.json")
+
+        if real_new_name == "":
+            # canceled
+            return
+
+        try:
+            app_config = self.get_config()
+            if app_config is None:
+                return
+            with open(real_new_name, "w") as f:
+                f.write(app_config.json())
+            messagebox.showinfo(message=f"Successfully saved to {real_new_name}")
+        except:
+            traceback.print_exc()
+            messagebox.showinfo(message=f"Failed to save to {real_new_name}")
+
+    def import_config(self):
+        filename = filedialog.askopenfilename(title="Choose config")
+        if filename == "":
+            # canceled
+            return
+
+        try:
+            with open(filename, "r") as f:
+                config_json = json.load(f)
+            app_config = AppConfig.parse_obj(config_json)
+
+            self.from_config(app_config)
+        except:
+            traceback.print_exc()
+            messagebox.showerror(message=f"Failed to load config")
+            return
+
     def configure_right_sidebar(self):
         parent = self.right_sidebar
-        ttk.Button(parent, text="Fit image", command=self.fit_image).pack()
+
+        config_io = ttk.LabelFrame(parent, text="Config")
+        ttk.Button(config_io, text="Export config", command=self.export_config).pack()
+        ttk.Button(config_io, text="Import config", command=self.import_config).pack()
+        config_io.pack()
 
         model_config = ttk.LabelFrame(parent, text="Model")
         model_config.pack()
@@ -208,24 +293,26 @@ class YoloV5InteractiveViewer:
         model_frame.pack()
 
         self.confidence = ZeroToOneScale(
-            model_config, label="Confidence", init=CONFIDENCE_DEFAULT
+            model_config, label="Confidence", init=consts.CONFIDENCE_DEFAULT
         )
         self.confidence.pack()
 
-        self.iou = ZeroToOneScale(model_config, label="IoU", init=IOU_DEFAULT)
+        self.iou = ZeroToOneScale(model_config, label="IoU", init=consts.IOU_DEFAULT)
         self.iou.pack()
 
         self.bb_config = LineConfigs(
-            parent, text="Bounding Boxes", color=BBOXES_COLOR_DEFAULT, width=2
+            parent, text="Bounding Boxes", color=consts.BBOXES_COLOR_DEFAULT, width=2
         )
         self.bb_config.pack()
 
         # mark outside of bounds
         self.outsider_config = LineConfigs(
-            parent, text="Outsiders", color=OUTSIDER_COLOR_DEFAULT, width=2
+            parent, text="Outsiders", color=consts.OUTSIDER_COLOR_DEFAULT, width=2
         )
         self.outsider_thres = ZeroToOneScale(
-            self.outsider_config, label="Min overlap %", init=OUTSIDE_THRES_DEFAULT
+            self.outsider_config,
+            label="Min overlap %",
+            init=consts.OUTSIDE_THRES_DEFAULT,
         )
         self.outsider_thres.pack()
         self.outsider_config.pack()
@@ -247,22 +334,25 @@ class YoloV5InteractiveViewer:
         load_mask_frame.pack()
 
         self.mask_thres = ZeroToOneScale(
-            mask_config, label="Min overlap %", init=MASK_THRES_DEFAULT
+            mask_config, label="Min overlap %", init=consts.MASK_THRES_DEFAULT
         )
         self.mask_thres.pack()
 
         mask_config.pack()
 
         self.bounds_config = LineConfigs(
-            parent, text="Upper/Lower Bounds", color=BOUNDS_COLOR_DEFAULT, width=1
+            parent,
+            text="Upper/Lower Bounds",
+            color=consts.BOUNDS_COLOR_DEFAULT,
+            width=1,
         )
         self.bounds_config.pack()
 
         self.upper_pixel = IntEntry(
-            self.bounds_config, label="Up Px", init=UPPER_BOUND_DEFAULT
+            self.bounds_config, label="Up Px", init=consts.UPPER_BOUND_DEFAULT
         )
         self.lower_pixel = IntEntry(
-            self.bounds_config, label="Lo Px", init=LOWER_BOUND_DEFAULT
+            self.bounds_config, label="Lo Px", init=consts.LOWER_BOUND_DEFAULT
         )
         self.upper_pixel.pack()
         self.lower_pixel.pack()
@@ -291,6 +381,10 @@ class YoloV5InteractiveViewer:
         ttk.Checkbutton(
             misc_frame, text="Disable upper/lower bounds", variable=self.disable_bounds
         ).pack()
+
+        ttk.Button(parent, text="Rerender", command=self.render_result).pack()
+
+        ttk.Separator(parent).pack()
 
         ttk.Button(parent, text="Run Detection", command=self.run_detect).pack()
 
@@ -374,7 +468,27 @@ class YoloV5InteractiveViewer:
             return None
         return self.realpathes[self.image_index]
 
-    def ensure_detect_params(self):
+    def run_detect(self):
+        if self.model is None:
+            messagebox.showerror(message="Model is not loaded")
+            return
+
+        filename = self.get_realpath()
+        if filename is None:
+            print("filename is None")
+            return
+
+        self.cv2_image = cv2.imread(filename)
+        cv2.cvtColor(self.cv2_image, cv2.COLOR_BGR2RGB, dst=self.cv2_image)
+
+        values = logic.run_detect(
+            self.model, self.cv2_image, self.confidence.get(), self.iou.get()
+        )
+
+        self.values = values
+        self.render_result()
+
+    def validate_params(self):
         bb_params = self.bb_config.get()
         if bb_params is None:
             messagebox.showerror(
@@ -410,55 +524,19 @@ class YoloV5InteractiveViewer:
             )
             return None
 
-        return (
-            bb_params,
-            outsider_params,
-            bounds_params,
-            lower_pixel,
-            upper_pixel,
-        )
-
-    def run_detect(self):
-        if self.model is None:
-            messagebox.showerror(message="Model is not loaded")
-            return
-
-        filename = self.get_realpath()
-        if filename is None:
-            print("filename is None")
-            return
-
-        self.cv2_image = cv2.imread(filename)
-        cv2.cvtColor(self.cv2_image, cv2.COLOR_BGR2RGB, dst=self.cv2_image)
-
-        self.model.conf = self.confidence.get()  # type: ignore (mismatch between float and Tensor | Module)
-        self.model.iou = self.iou.get()
-        detected = self.model(self.cv2_image, size=1280)
-
-        values = detected.pandas().xyxy[0]
-
-        # coords in dataframe are float, so they need to be cast into int
-        # (because cv2 accepts int coords only)
-        values.round(0)
-        values = values.astype({"xmin": int, "ymin": int, "xmax": int, "ymax": int})
-
-        self.values = values
-        self.render_result()
+        return (bb_params, outsider_params, bounds_params, upper_pixel, lower_pixel)
 
     def render_result(self):
+        # check detect is done
         if self.values is None:
             return
 
-        params = self.ensure_detect_params()
+        # check params
+        params = self.validate_params()
         if params is None:
             return
-        (
-            bb_params,
-            outsider_params,
-            bounds_params,
-            lower_pixel,
-            upper_pixel,
-        ) = params
+
+        (bb_params, outsider_params, bounds_params, upper_pixel, lower_pixel) = params
 
         # check mask
         enable_mask = self.enable_mask.get()
@@ -475,103 +553,35 @@ class YoloV5InteractiveViewer:
                 )
                 return
 
-        cv2_image_copy = self.cv2_image.copy()
-
-        # draw filename
+        # set filename
+        filename = None
         if self.show_filename.get():
-            filename = self.get_realpath()
-            if filename is None:
+            realpath = self.get_realpath()
+            if realpath is None:
                 filename = "ERROR: NO NAME"
+            else:
+                filename = os.path.basename(realpath)
 
-            cv2.putText(
-                cv2_image_copy,
-                text=os.path.basename(filename),
-                org=(10, cv2_image_copy.shape[0] - 20),
-                fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                fontScale=1,
-                color=TEXT_COLOR,
-                thickness=2,
-            )
+        image_copied = self.cv2_image.copy()
+        logic.draw_result(
+            values=self.values,
+            cv2_image=image_copied,
+            filename=filename,
+            bb_params=bb_params,
+            show_confidence=self.show_confidence.get(),
+            outsider_params=outsider_params,
+            outsider_thres=self.outsider_thres.get(),
+            hide_outsiders=self.hide_outsiders.get(),
+            bounds_params=bounds_params,
+            upper_pixel=upper_pixel,
+            lower_pixel=lower_pixel,
+            disable_bounds=self.disable_bounds.get(),
+            mask=self.mask if enable_mask else None,
+            mask_thres=self.mask_thres.get(),
+            text_color=consts.TEXT_COLOR,
+        )
 
-        # draw bounding boxes and bounds
-        (bb_color, bb_width) = bb_params
-        (outsider_color, outsider_width) = outsider_params
-        bounds = [(0, upper_pixel), (self.cv2_image.shape[1], lower_pixel)]
-        for row in self.values.itertuples():
-            bb_area = (row.xmax - row.xmin) * (row.ymax - row.ymin)
-
-            if bb_area <= 0:
-                # not sure if this can happen
-                continue
-
-            outsider_thres = self.outsider_thres.get()
-            is_outsider = False
-
-            # handle bounds
-            if not self.disable_bounds.get():
-                # compute the area of intersection
-                bb = [(row.xmin, row.ymin), (row.xmax, row.ymax)]
-                max_of_x_min = max(bounds[0][0], bb[0][0])
-                max_of_y_min = max(bounds[0][1], bb[0][1])
-                min_of_x_max = min(bounds[1][0], bb[1][0])
-                min_of_y_max = min(bounds[1][1], bb[1][1])
-                w = min_of_x_max - max_of_x_min
-                h = min_of_y_max - max_of_y_min
-                intersect = w * h if w > 0 and h > 0 else 0
-
-                intersect_ratio = intersect / bb_area
-
-                if intersect_ratio < outsider_thres:
-                    is_outsider = True
-
-                # draw bound rectangle
-                (bounds_color, bounds_width) = bounds_params
-                cv2.rectangle(
-                    cv2_image_copy,
-                    (0, upper_pixel),
-                    (cv2_image_copy.shape[1], lower_pixel),
-                    bounds_color,
-                    bounds_width,
-                )
-
-            # handle mask
-            if enable_mask:
-                if self.mask is None:
-                    # this should never happen
-                    messagebox.showerror(message="Internal error: Mask is None")
-                    return
-
-                mask_cropped = self.mask[row.ymin : row.ymax, row.xmin : row.xmax]
-                whites = numpy.sum(mask_cropped == 255)
-                mask_intersect_ratio = whites / bb_area
-                if mask_intersect_ratio < self.mask_thres.get():
-                    is_outsider = True
-
-            box_color = outsider_color if is_outsider else bb_color
-            box_width = outsider_width if is_outsider else bb_width
-
-            hide_detect = self.hide_outsiders.get() and is_outsider
-
-            if not hide_detect:
-                cv2.rectangle(
-                    cv2_image_copy,
-                    (row.xmin, row.ymin),
-                    (row.xmax, row.ymax),
-                    box_color,
-                    box_width,
-                )
-                if self.show_confidence.get():
-                    cv2.putText(
-                        cv2_image_copy,
-                        text=f"{row.confidence:.2f}",
-                        org=(row.xmin, row.ymin - 10),
-                        fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                        fontScale=0.5,
-                        color=TEXT_COLOR,
-                        thickness=2,
-                    )
-
-        self.pil_image = Image.fromarray(cv2_image_copy)
+        self.pil_image = Image.fromarray(image_copied)
 
         self.fit_image()
 
