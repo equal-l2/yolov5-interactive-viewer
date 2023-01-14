@@ -10,8 +10,11 @@ import traceback
 import typing
 import numpy
 
-CONFIDENCE_DEFAULT = 0.25  # the default value from YOLOv5 detect.py
+# YOLOv5 parameters, from the default value in detect.py
+CONFIDENCE_DEFAULT = 0.25
+IOU_DEFAULT = 0.45
 
+# our parameters
 OUTSIDE_THRES_DEFAULT = 0.7
 UPPER_BOUND_DEFAULT = 287
 LOWER_BOUND_DEFAULT = 850
@@ -186,27 +189,28 @@ class YoloV5InteractiveViewer:
         parent = self.right_sidebar
         ttk.Button(parent, text="Fit image", command=self.fit_image).pack()
 
-        model_frame = ttk.Frame(parent)
-        model_frame.pack()
+        model_config = ttk.LabelFrame(parent, text="Model")
+        model_config.pack()
 
+        model_frame = ttk.Frame(model_config)
         ttk.Button(model_frame, text="Load model", command=self.load_model).pack(
             side=tkinter.LEFT
         )
         self.model_name = ttk.Label(model_frame)
         self.model_name.pack(side=tkinter.LEFT)
+        model_frame.pack()
 
         self.confidence = ZeroToOneScale(
-            parent, label="Confidence", init=CONFIDENCE_DEFAULT
+            model_config, label="Confidence", init=CONFIDENCE_DEFAULT
         )
         self.confidence.pack()
+
+        self.iou = ZeroToOneScale(model_config, label="IoU", init=IOU_DEFAULT)
+        self.iou.pack()
 
         self.bb_config = LineConfigs(
             parent, text="Bounding Boxes", color=BBOXES_COLOR_DEFAULT, width=2
         )
-        self.show_confidence = tkinter.BooleanVar()
-        ttk.Checkbutton(
-            self.bb_config, text="Show confidence", variable=self.show_confidence
-        ).pack()
         self.bb_config.pack()
 
         # mark outside of bounds
@@ -217,21 +221,17 @@ class YoloV5InteractiveViewer:
             self.outsider_config, label="Min overlap %", init=OUTSIDE_THRES_DEFAULT
         )
         self.outsider_thres.pack()
-        self.hide_outsiders = tkinter.BooleanVar()
-        ttk.Checkbutton(
-            self.outsider_config, text="Hide outsiders", variable=self.hide_outsiders
-        ).pack()
         self.outsider_config.pack()
 
         # mask settings
-        mask_frame = ttk.LabelFrame(parent, text="Mask")
+        mask_config = ttk.LabelFrame(parent, text="Mask")
 
-        self.enable_mask = tkinter.BooleanVar()
+        self.enable_mask = tkinter.BooleanVar(value=False)
         ttk.Checkbutton(
-            mask_frame, text="Apply mask as postprocess", variable=self.enable_mask
+            mask_config, text="Apply mask as postprocess", variable=self.enable_mask
         ).pack()
 
-        load_mask_frame = ttk.Frame(mask_frame)
+        load_mask_frame = ttk.Frame(mask_config)
         ttk.Button(load_mask_frame, text="Load mask", command=self.load_mask).pack(
             side=tkinter.LEFT
         )
@@ -239,7 +239,7 @@ class YoloV5InteractiveViewer:
         self.mask_name.pack(side=tkinter.LEFT)
         load_mask_frame.pack()
 
-        mask_frame.pack()
+        mask_config.pack()
 
         self.bounds_config = LineConfigs(
             parent, text="Upper/Lower Bounds", color=BOUNDS_COLOR_DEFAULT, width=1
@@ -255,11 +255,32 @@ class YoloV5InteractiveViewer:
         self.upper_pixel.pack()
         self.lower_pixel.pack()
 
-        ttk.Button(parent, text="Run Detection", command=self.run_detect).pack()
+        misc_frame = ttk.LabelFrame(parent, text="Misc")
+        misc_frame.pack()
 
-    def handle_own_renderer_checkbutton(self, *_):
-        # enable / disable all control associated with the own renderer
-        pass
+        self.hide_outsiders = tkinter.BooleanVar(value=False)
+        ttk.Checkbutton(
+            misc_frame, text="Hide outsiders", variable=self.hide_outsiders
+        ).pack()
+
+        self.show_confidence = tkinter.BooleanVar(value=False)
+        ttk.Checkbutton(
+            misc_frame,
+            text="Show confidence with bounding boxes",
+            variable=self.show_confidence,
+        ).pack()
+
+        self.show_filename = tkinter.BooleanVar(value=True)
+        ttk.Checkbutton(
+            misc_frame, text="Show filename in the picture", variable=self.show_filename
+        ).pack()
+
+        self.disable_bounds = tkinter.BooleanVar(value=False)
+        ttk.Checkbutton(
+            misc_frame, text="Disable upper/lower bounds", variable=self.disable_bounds
+        ).pack()
+
+        ttk.Button(parent, text="Run Detection", command=self.run_detect).pack()
 
     def fit_image(self):
         if self.pil_image is not None:
@@ -399,6 +420,7 @@ class YoloV5InteractiveViewer:
         cv2.cvtColor(self.cv2_image, cv2.COLOR_BGR2RGB, dst=self.cv2_image)
 
         self.model.conf = self.confidence.get()  # type: ignore (mismatch between float and Tensor | Module)
+        self.model.iou = self.iou.get()
         detected = self.model(self.cv2_image, size=1280)
 
         values = detected.pandas().xyxy[0]
@@ -444,19 +466,20 @@ class YoloV5InteractiveViewer:
         cv2_image_copy = self.cv2_image.copy()
 
         # draw filename
-        filename = self.get_realpath()
-        if filename is None:
-            filename = "ERROR: NO NAME"
+        if self.show_filename.get():
+            filename = self.get_realpath()
+            if filename is None:
+                filename = "ERROR: NO NAME"
 
-        cv2.putText(
-            cv2_image_copy,
-            text=os.path.basename(filename),
-            org=(10, cv2_image_copy.shape[0] - 20),
-            fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-            fontScale=1,
-            color=TEXT_COLOR,
-            thickness=2,
-        )
+            cv2.putText(
+                cv2_image_copy,
+                text=os.path.basename(filename),
+                org=(10, cv2_image_copy.shape[0] - 20),
+                fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                fontScale=1,
+                color=TEXT_COLOR,
+                thickness=2,
+            )
 
         # draw bounding boxes and bounds
         (bb_color, bb_width) = bb_params
@@ -472,20 +495,32 @@ class YoloV5InteractiveViewer:
             outsider_thres = self.outsider_thres.get()
             is_outsider = False
 
-            # compute the area of intersection
-            bb = [(row.xmin, row.ymin), (row.xmax, row.ymax)]
-            max_of_x_min = max(bounds[0][0], bb[0][0])
-            max_of_y_min = max(bounds[0][1], bb[0][1])
-            min_of_x_max = min(bounds[1][0], bb[1][0])
-            min_of_y_max = min(bounds[1][1], bb[1][1])
-            w = min_of_x_max - max_of_x_min
-            h = min_of_y_max - max_of_y_min
-            intersect = w * h if w > 0 and h > 0 else 0
+            # handle bounds
+            if not self.disable_bounds.get():
+                # compute the area of intersection
+                bb = [(row.xmin, row.ymin), (row.xmax, row.ymax)]
+                max_of_x_min = max(bounds[0][0], bb[0][0])
+                max_of_y_min = max(bounds[0][1], bb[0][1])
+                min_of_x_max = min(bounds[1][0], bb[1][0])
+                min_of_y_max = min(bounds[1][1], bb[1][1])
+                w = min_of_x_max - max_of_x_min
+                h = min_of_y_max - max_of_y_min
+                intersect = w * h if w > 0 and h > 0 else 0
 
-            intersect_ratio = intersect / bb_area
+                intersect_ratio = intersect / bb_area
 
-            if intersect_ratio < outsider_thres:
-                is_outsider = True
+                if intersect_ratio < outsider_thres:
+                    is_outsider = True
+
+                # draw bound rectangle
+                (bounds_color, bounds_width) = bounds_params
+                cv2.rectangle(
+                    cv2_image_copy,
+                    (0, upper_pixel),
+                    (cv2_image_copy.shape[1], lower_pixel),
+                    bounds_color,
+                    bounds_width,
+                )
 
             # handle mask
             if enable_mask:
@@ -523,16 +558,6 @@ class YoloV5InteractiveViewer:
                         color=TEXT_COLOR,
                         thickness=2,
                     )
-
-        # draw bound rectangle
-        (bounds_color, bounds_width) = bounds_params
-        cv2.rectangle(
-            cv2_image_copy,
-            (0, upper_pixel),
-            (cv2_image_copy.shape[1], lower_pixel),
-            bounds_color,
-            bounds_width,
-        )
 
         self.pil_image = Image.fromarray(cv2_image_copy)
 
