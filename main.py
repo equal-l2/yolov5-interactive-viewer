@@ -57,8 +57,14 @@ class IntEntry(ttk.Frame):
             textvariable=self.value,
         ).pack(side=tkinter.LEFT)
 
-    def get(self):
+    def strip(self):
         s = self.value.get()
+        self.value.set(s.strip())
+
+    def get(self):
+        self.strip()
+        s = self.value.get()
+
         if not s.isdigit():
             return None
 
