@@ -1,5 +1,8 @@
 # YOLOv5 Interactive Viewer
-Run inference on images
+Run inference on images interactively
 
 ## Limitation
-- only single class model is supported
+- Only a single-class model is supported
+
+## Bonus
+`video.py` can bulk-infer on a video, using the config file exported from viewer (`main.py`).
