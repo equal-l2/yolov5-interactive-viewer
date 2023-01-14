@@ -16,6 +16,7 @@ IOU_DEFAULT = 0.45
 
 # our parameters
 OUTSIDE_THRES_DEFAULT = 0.7
+MASK_THRES_DEFAULT = OUTSIDE_THRES_DEFAULT
 UPPER_BOUND_DEFAULT = 287
 LOWER_BOUND_DEFAULT = 850
 
@@ -238,6 +239,11 @@ class YoloV5InteractiveViewer:
         self.mask_name = ttk.Label(load_mask_frame)
         self.mask_name.pack(side=tkinter.LEFT)
         load_mask_frame.pack()
+
+        self.mask_thres = ZeroToOneScale(
+            mask_config, label="Min overlap %", init=MASK_THRES_DEFAULT
+        )
+        self.mask_thres.pack()
 
         mask_config.pack()
 
@@ -532,7 +538,7 @@ class YoloV5InteractiveViewer:
                 mask_cropped = self.mask[row.ymin : row.ymax, row.xmin : row.xmax]
                 whites = numpy.sum(mask_cropped == 255)
                 mask_intersect_ratio = whites / bb_area
-                if mask_intersect_ratio < outsider_thres:
+                if mask_intersect_ratio < self.mask_thres.get():
                     is_outsider = True
 
             box_color = outsider_color if is_outsider else bb_color
@@ -566,7 +572,7 @@ class YoloV5InteractiveViewer:
 
 print("Initializing...")
 root = tkinter.Tk()
-root.geometry("1600x800")
+root.geometry("1600x1000")
 root.title("YOLOv5 Interactive Viewer")
 # configureしないと伸びない
 root.columnconfigure(0, weight=1)
