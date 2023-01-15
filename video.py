@@ -18,9 +18,11 @@ parser.add_argument("--config", required=True)
 parser.add_argument("--model", required=True)
 parser.add_argument("--mask", required=False)
 
+
 def to_bgr(rgb: RgbTuple) -> tuple[int, int, int]:
     (r, g, b) = rgb
     return (b, g, r)
+
 
 # Convert all colors in config from RGB to BGR, for cv2
 def config_to_bgr(config: AppConfig):
@@ -29,10 +31,11 @@ def config_to_bgr(config: AppConfig):
     config.bounds_color = to_bgr(config.bounds_color)
     return config
 
+
 def run(
     src_path: str, dst_path: str, config_path: str, model_path: str, mask_path: str
 ):
-    print(f"[I] Load config from \"{config_path}\"")
+    print(f'[I] Load config from "{config_path}"')
     with open(config_path, "r") as f:
         config_json = json.load(f)
     config = config_to_bgr(AppConfig.parse_obj(config_json))
@@ -40,11 +43,12 @@ def run(
     # sorry to be here, but for performance...
     print(f"[I] Check mask")
     import cv2
+
     if mask_path is None:
         print("[W] No mask is provided, disable mask")
         mask = None
     else:
-        print(f"[I] Load mask from \"{mask_path}\"")
+        print(f'[I] Load mask from "{mask_path}"')
         mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
         if mask is None:
             print("[F] Failed to load mask")
@@ -53,7 +57,7 @@ def run(
     # For other OSes than macOS, cv2.CAP_FFMPEG can be used
     CV2_API_PREFERENCE = cv2.CAP_AVFOUNDATION
 
-    print(f"[I] Open source \"{src_path}\"")
+    print(f'[I] Open source "{src_path}"')
     reader = cv2.VideoCapture(src_path, apiPreference=CV2_API_PREFERENCE)
 
     if not reader.isOpened():
@@ -65,20 +69,25 @@ def run(
     fps = reader.get(cv2.CAP_PROP_FPS)
     frame_count = int(reader.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    print(f"[I] Open destination \"{dst_path}\"")
+    print(f'[I] Open destination "{dst_path}"')
     if exists(dst_path):
         print(f"[F] Output already exists, cannot save")
         return -1
     writer = cv2.VideoWriter(
-        filename=dst_path, apiPreference=CV2_API_PREFERENCE, fourcc=cv2.VideoWriter_fourcc(*"avc1"), fps=fps, frameSize=(width, height)
+        filename=dst_path,
+        apiPreference=CV2_API_PREFERENCE,
+        fourcc=cv2.VideoWriter_fourcc(*"avc1"),
+        fps=fps,
+        frameSize=(width, height),
     )
     if not writer.isOpened():
         print(f"[F] Failed to open destination")
         return -1
 
     # sorry to be here, but for performance...
-    print(f"[I] Load model from \"{model_path}\"")
+    print(f'[I] Load model from "{model_path}"')
     import yolov5
+
     model = yolov5.load(model_path)
 
     print("[I] Start processing")
