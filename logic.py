@@ -52,44 +52,14 @@ def draw_result(
     text_color: RgbTuple,
     config: AppConfig,
 ):
-    _draw_result(
-        values=values,
-        cv2_image=cv2_image,
-        filename=filename,
-        bb_params=LineParam(color=config.bb_color, width=config.bb_width),
-        show_confidence=config.show_confidence,
-        outsider_params=LineParam(
-            color=config.outsider_color, width=config.outsider_width
-        ),
-        outsider_thres=config.outsider_thres,
-        hide_outsiders=config.hide_outsiders,
-        bounds_params=LineParam(color=config.bounds_color, width=config.bounds_width),
-        upper_pixel=config.upper_pixel,
-        lower_pixel=config.lower_pixel,
-        disable_bounds=config.disable_bounds,
-        mask=mask,
-        mask_thres=config.mask_thres,
-        text_color=text_color,
-    )
+    darken_outside_mask = True  # TODO: add config
+    # darken outside mask
+    if mask is not None and darken_outside_mask:
+        mask_color = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB)
+        inside_mask = cv2.bitwise_and(mask_color, cv2_image)
+        cv2.imshow("", inside_mask)
+        cv2.addWeighted(cv2_image, 1, inside_mask, 1, 0, dst=cv2_image)
 
-
-def _draw_result(
-    values: DetectValues,
-    cv2_image: Cv2Image,
-    filename: Optional[str],
-    bb_params: LineParam,
-    show_confidence: bool,
-    outsider_params: LineParam,
-    outsider_thres: float,
-    hide_outsiders: bool,
-    bounds_params: LineParam,
-    upper_pixel: int,
-    lower_pixel: int,
-    disable_bounds: bool,
-    mask: Optional[Cv2Image],
-    mask_thres: float,
-    text_color: RgbTuple,
-):
     if filename is not None:
         cv2.putText(
             cv2_image,
@@ -102,10 +72,7 @@ def _draw_result(
         )
 
     # draw bounding boxes and bounds
-    (bb_color, bb_width) = bb_params
-    (outsider_color, outsider_width) = outsider_params
-
-    bounds = ((0, upper_pixel), (cv2_image.shape[1], lower_pixel))
+    bounds = ((0, config.upper_pixel), (cv2_image.shape[1], config.lower_pixel))
     for row in values.itertuples():
         bb_area = (row.xmax - row.xmin) * (row.ymax - row.ymin)
 
@@ -116,23 +83,22 @@ def _draw_result(
         is_outsider = False
 
         # handle bounds
-        if not disable_bounds:
+        if not config.disable_bounds:
             # compute the area of intersection
             bb = ((row.xmin, row.ymin), (row.xmax, row.ymax))
             intersect = compute_intersect(bounds, bb)
             intersect_ratio = intersect / bb_area
 
-            if intersect_ratio < outsider_thres:
+            if intersect_ratio < config.outsider_thres:
                 is_outsider = True
 
             # draw bound rectangle
-            (bounds_color, bounds_width) = bounds_params
             cv2.rectangle(
                 cv2_image,
-                (0, upper_pixel),
-                (cv2_image.shape[1], lower_pixel),
-                bounds_color,
-                bounds_width,
+                (0, config.upper_pixel),
+                (cv2_image.shape[1], config.lower_pixel),
+                config.bounds_color,
+                config.bounds_width,
             )
 
         # handle mask
@@ -140,13 +106,13 @@ def _draw_result(
             mask_cropped = mask[row.ymin : row.ymax, row.xmin : row.xmax]
             whites = numpy.sum(mask_cropped == 255)
             mask_intersect_ratio = whites / bb_area
-            if mask_intersect_ratio < mask_thres:
+            if mask_intersect_ratio < config.mask_thres:
                 is_outsider = True
 
-        box_color = outsider_color if is_outsider else bb_color
-        box_width = outsider_width if is_outsider else bb_width
+        box_color = config.outsider_color if is_outsider else config.bb_color
+        box_width = config.outsider_width if is_outsider else config.bb_width
 
-        hide_detect = hide_outsiders and is_outsider
+        hide_detect = config.hide_outsiders and is_outsider
 
         if not hide_detect:
             cv2.rectangle(
@@ -156,7 +122,7 @@ def _draw_result(
                 box_color,
                 box_width,
             )
-            if show_confidence:
+            if config.show_confidence:
                 cv2.putText(
                     cv2_image,
                     text=f"{row.confidence:.2f}",
