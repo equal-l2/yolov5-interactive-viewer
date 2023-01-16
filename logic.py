@@ -52,12 +52,11 @@ def draw_result(
     text_color: RgbTuple,
     config: AppConfig,
 ):
-    darken_outside_mask = True  # TODO: add config
-    # darken outside mask
-    if mask is not None and darken_outside_mask:
-        mask_color = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB)
-        inside_mask = cv2.bitwise_and(mask_color, cv2_image)
-        cv2.addWeighted(cv2_image, 1, inside_mask, 1, 0, dst=cv2_image)
+    mask_overlay = True  # TODO: add config
+    if mask is not None and mask_overlay:
+        # draw the edge of the mask
+        mask_edge = cv2.Canny(mask, 10, 245)
+        cv2_image[mask_edge>0]=config.bounds_color
 
     if filename is not None:
         cv2.putText(
