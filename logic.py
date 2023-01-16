@@ -57,7 +57,6 @@ def draw_result(
     if mask is not None and darken_outside_mask:
         mask_color = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB)
         inside_mask = cv2.bitwise_and(mask_color, cv2_image)
-        cv2.imshow("", inside_mask)
         cv2.addWeighted(cv2_image, 1, inside_mask, 1, 0, dst=cv2_image)
 
     if filename is not None:

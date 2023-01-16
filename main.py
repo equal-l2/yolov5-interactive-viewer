@@ -151,23 +151,58 @@ class YoloV5InteractiveViewer:
         self.configure_left_sidebar()
         self.configure_right_sidebar()
 
-    def configure_left_sidebar(self):
-        ttk.Button(
-            self.left_sidebar, text="Load folder", command=self.load_folder
-        ).pack()
+    def _update_image_index(self, new_index: int):
+        self.image_index = new_index
+        self.run_detect()
 
-        def update_index(e: typing.Any):
+    def set_image_index(self, new_index: int):
+        if self.file_list is None:
+            return
+
+        file_list = self.file_list
+        if 0 <= new_index and new_index < file_list.size():
+            file_list.see(new_index)
+            file_list.selection_clear(0, tkinter.END)
+            file_list.selection_set(new_index)
+            self._update_image_index(new_index)
+
+    def configure_left_sidebar(self):
+        parent = self.left_sidebar
+        ttk.Button(parent, text="Load folder", command=self.load_folder).pack()
+
+        def on_list_selected(e: typing.Any):
             select = e.widget.curselection()
             if len(select) < 1:
                 return
-            self.image_index = select[0]
-            self.run_detect()
+            self._update_image_index(select[0])
 
-        self.file_list = tkinter.Listbox(self.left_sidebar, height=10)
+        self.file_list = tkinter.Listbox(parent, height=10)
         self.file_list.pack()
-        self.file_list.bind("<<ListboxSelect>>", update_index)
+        self.file_list.bind("<<ListboxSelect>>", on_list_selected)
 
-        ttk.Button(self.left_sidebar, text="Save picture", command=self.save).pack()
+        def modify_index(delta: int):
+            if self.file_list is None:
+                return
+            file_list = self.file_list
+            select = file_list.curselection()
+            if len(select) < 1:
+                return
+            current = select[0]
+            next = current + delta
+            self.set_image_index(next)
+
+        nav_frame = ttk.Frame(parent)
+        ttk.Button(nav_frame, text="<-", command=lambda: modify_index(-1)).grid(
+            row=0, column=0
+        )
+        ttk.Button(nav_frame, text="->", command=lambda: modify_index(1)).grid(
+            row=0, column=2
+        )
+        nav_frame.pack()
+
+        ttk.Separator(parent, orient=tkinter.HORIZONTAL).pack()
+
+        ttk.Button(parent, text="Save picture", command=self.save).pack()
 
     def save(self):
         if self.image_index >= len(self.realpathes) or self.pil_image is None:
@@ -489,6 +524,7 @@ class YoloV5InteractiveViewer:
         tk_imagelist = tkinter.StringVar(value=image_names)  # type: ignore (mismatch between value and image_names)
         if self.file_list is not None:
             self.file_list["listvariable"] = tk_imagelist
+            self.set_image_index(0)
 
     def get_realpath(self):
         if self.image_index >= len(self.realpathes):
