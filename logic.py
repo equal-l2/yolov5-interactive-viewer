@@ -12,7 +12,7 @@ DetectValues: TypeAlias = typing.Any
 def run_detect(model: Model, cv2_image: Cv2Image, config: AppConfig) -> DetectValues:
     model.conf = config.confidence
     model.iou = config.iou
-    detected = model(cv2_image, size=1280)
+    detected = model(cv2_image, size=1280, augment=config.augment)
 
     values = detected.pandas().xyxy[0]
 

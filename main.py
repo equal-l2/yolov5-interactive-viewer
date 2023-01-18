@@ -278,6 +278,7 @@ class YoloV5InteractiveViewer:
             lower_pixel=lower_pixel,
             disable_bounds=self.disable_bounds.get(),
             mask_thres=self.mask_thres.get(),
+            augment=self.augment.get()
         )
 
     def from_config(self, app_config: AppConfig):
@@ -301,6 +302,7 @@ class YoloV5InteractiveViewer:
         self.lower_pixel.set(app_config.lower_pixel)
         self.disable_bounds.set(app_config.disable_bounds)
         self.mask_thres.set(app_config.mask_thres)
+        self.augment.set(app_config.augment)
 
     def export_config(self):
         real_new_name = filedialog.asksaveasfilename(initialfile="config.json")
@@ -363,6 +365,11 @@ class YoloV5InteractiveViewer:
 
         self.iou = ZeroToOneScale(model_config, label="IoU", init=consts.IOU_DEFAULT)
         self.iou.pack()
+
+        self.augment = tkinter.BooleanVar(value=False)
+        ttk.Checkbutton(
+            model_config, text="Enable augmentation on inference", variable=self.augment
+        ).pack()
 
         self.bb_config = LineConfigs(
             parent, text="Bounding Boxes", color=consts.BBOXES_COLOR_DEFAULT, width=2

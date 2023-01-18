@@ -33,3 +33,6 @@ class AppConfig(BaseModel):
     lower_pixel: int
     disable_bounds: bool
     mask_thres: float
+    augment: bool
+    # For compatibility
+    augment = False
