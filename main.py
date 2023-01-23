@@ -448,7 +448,7 @@ class YoloV5InteractiveViewer:
             misc_frame, text="Show filename in the picture", variable=self.show_filename
         ).pack()
 
-        self.disable_bounds = tkinter.BooleanVar(value=False)
+        self.disable_bounds = tkinter.BooleanVar(value=True)
         ttk.Checkbutton(
             misc_frame, text="Disable upper/lower bounds", variable=self.disable_bounds
         ).pack()
