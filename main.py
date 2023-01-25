@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
-from PIL import Image, ImageTk, ImageColor
-from tkinter import ttk, filedialog, messagebox, colorchooser
+from PIL import Image, ImageTk
+from tkinter import ttk, filedialog, messagebox
 import json
 import os
 import tkinter
@@ -9,113 +9,11 @@ import traceback
 import typing
 
 import cv2
-import yolov5
 
-from structs import RgbTuple, LineParam, AppConfig
+from structs import AppConfig
 import consts
 import logic
-
-
-class LineConfigs(ttk.Frame):
-    def __init__(self, root: tkinter.Misc, color: str, width: int):
-        ttk.Frame.__init__(self, root)
-
-        self.width_entry = IntEntry(self, label="Line width", init=width)
-        self.width_entry.pack()
-
-        self.colorpicker = ColorPicker(self, text="Line color", color=color)
-        self.colorpicker.pack()
-
-    def get(self):
-        width = self.width_entry.get()
-        if width is None:
-            return None
-        else:
-            return LineParam(self.colorpicker.get(), width)
-
-    def set(self, color: str, width: int):
-        self.colorpicker.set(color)
-        self.width_entry.set(width)
-
-
-class IntEntry(ttk.Frame):
-    def __init__(self, root: tkinter.Misc, label: str, init: int):
-        ttk.Frame.__init__(self, root)
-
-        self.value = tkinter.StringVar(value=str(init))
-        ttk.Label(self, text=label).pack(side=tkinter.LEFT)
-        ttk.Entry(
-            self,
-            textvariable=self.value,
-        ).pack(side=tkinter.LEFT)
-
-    def strip(self):
-        s = self.value.get()
-        self.value.set(s.strip())
-
-    def get(self):
-        self.strip()
-        s = self.value.get()
-
-        if not s.isdigit():
-            return None
-
-        try:
-            val = int(s)
-            if str(val) == s and val > 0:
-                return val
-            else:
-                return None
-        except:
-            traceback.print_exc()
-            return None
-
-    def set(self, val: int):
-        self.value.set(str(val))
-
-
-class ColorPicker(ttk.Frame):
-    def __init__(self, root: tkinter.Misc, text: str, color: str):
-        ttk.Frame.__init__(self, root)
-
-        ttk.Label(self, text=text).pack(side=tkinter.LEFT)
-        ttk.Button(self, text="Choose...", command=self.choose_line_color).pack(
-            side=tkinter.LEFT
-        )
-        self.color_label = tkinter.Label(self, text="     ")
-        self.color_label.pack(side=tkinter.LEFT)
-
-        self.set(color)
-
-    def choose_line_color(self):
-        colors = colorchooser.askcolor()
-        if colors is not None and colors[1] is not None:
-            self._set_color(colors[1])
-
-    def _set_color(self, color: str):
-        self.color = color
-        self.color_label["bg"] = color
-
-    def get(self) -> RgbTuple:
-        return ImageColor.getrgb(self.color)[0:3]
-
-    def set(self, color: str):
-        ImageColor.getrgb(color)  # test the color is valid
-        self._set_color(color)
-
-
-class ZeroToOneScale(tkinter.Scale):
-    def __init__(self, root: tkinter.Misc, label: str, init: float):
-        tkinter.Scale.__init__(
-            self,
-            root,
-            from_=0,
-            to=1.0,
-            resolution=0.01,
-            label=label,
-            orient=tkinter.HORIZONTAL,
-        )
-        self.set(init)
+import widgets
 
 
 class YoloV5InteractiveViewer:
@@ -141,7 +39,7 @@ class YoloV5InteractiveViewer:
         mainframe.rowconfigure(0, weight=1)
 
         self.tk_image = None  # need to be alive
-        self.model = None
+        self.model: typing.Optional[consts.MODEL_TYPE] = None
         self.pil_image = None
         self.realpathes: list[str] = []
         self.image_index: int = 0
@@ -248,20 +146,6 @@ class YoloV5InteractiveViewer:
             )
             return None
 
-        upper_pixel = self.upper_pixel.get()
-        if upper_pixel is None:
-            messagebox.showerror(
-                message="Upper Bounds: Pixel must be a positive interger"
-            )
-            return None
-
-        lower_pixel = self.lower_pixel.get()
-        if lower_pixel is None:
-            messagebox.showerror(
-                message="Lower Bounds: Pixel must be a positive interger"
-            )
-            return None
-
         return AppConfig(
             confidence=self.confidence.get(),
             iou=self.iou.get(),
@@ -270,13 +154,9 @@ class YoloV5InteractiveViewer:
             show_confidence=self.show_confidence.get(),
             outsider_color=outsider_params.color,
             outsider_width=outsider_params.width,
-            outsider_thres=self.outsider_thres.get(),
             hide_outsiders=self.hide_outsiders.get(),
             bounds_color=bounds_params.color,
             bounds_width=bounds_params.width,
-            upper_pixel=upper_pixel,
-            lower_pixel=lower_pixel,
-            disable_bounds=self.disable_bounds.get(),
             mask_thres=self.mask_thres.get(),
             augment=self.augment.get(),
         )
@@ -292,15 +172,11 @@ class YoloV5InteractiveViewer:
             color=logic.rgb2hex(app_config.outsider_color),
             width=app_config.outsider_width,
         )
-        self.outsider_thres.set(app_config.outsider_thres)
         self.hide_outsiders.set(app_config.hide_outsiders)
         self.bounds_config.set(
             color=logic.rgb2hex(app_config.bounds_color),
             width=app_config.bounds_width,
         )
-        self.upper_pixel.set(app_config.upper_pixel)
-        self.lower_pixel.set(app_config.lower_pixel)
-        self.disable_bounds.set(app_config.disable_bounds)
         self.mask_thres.set(app_config.mask_thres)
         self.augment.set(app_config.augment)
 
@@ -323,7 +199,9 @@ class YoloV5InteractiveViewer:
             messagebox.showinfo(message=f"Failed to save to {real_new_name}")
 
     def import_config(self):
-        filename = filedialog.askopenfilename(title="Choose config")
+        filename = filedialog.askopenfilename(
+            title="Choose config", filetypes=[("json", "*.json")]
+        )
         if filename == "":
             # canceled
             return
@@ -334,10 +212,10 @@ class YoloV5InteractiveViewer:
             app_config = AppConfig.parse_obj(config_json)
 
             self.from_config(app_config)
+            messagebox.showinfo(message=f"Successfully loaded from {filename}")
         except:
             traceback.print_exc()
             messagebox.showerror(message=f"Failed to load config")
-            return
 
     def configure_right_sidebar(self):
         parent = self.right_sidebar
@@ -347,60 +225,45 @@ class YoloV5InteractiveViewer:
         ttk.Button(config_io, text="Import config", command=self.import_config).pack()
         config_io.pack()
 
+        # model config BEGIN
         model_config = ttk.LabelFrame(parent, text="Model")
         model_config.pack()
 
-        model_frame = ttk.Frame(model_config)
-        ttk.Button(model_frame, text="Load model", command=self.load_model).pack(
+        load_model_frame = ttk.Frame(model_config)
+        ttk.Button(load_model_frame, text="Load model", command=self.load_model).pack(
             side=tkinter.LEFT
         )
-        self.model_name = ttk.Label(model_frame)
+        self.model_name = ttk.Label(load_model_frame)
         self.model_name.pack(side=tkinter.LEFT)
-        model_frame.pack()
+        load_model_frame.pack()
 
-        self.confidence = ZeroToOneScale(
+        self.confidence = widgets.ZeroToOneScale(
             model_config, label="Confidence", init=consts.CONFIDENCE_DEFAULT
         )
         self.confidence.pack()
 
-        self.iou = ZeroToOneScale(model_config, label="IoU", init=consts.IOU_DEFAULT)
+        self.iou = widgets.ZeroToOneScale(
+            model_config, label="IoU", init=consts.IOU_DEFAULT
+        )
         self.iou.pack()
 
         self.augment = tkinter.BooleanVar(value=False)
         ttk.Checkbutton(
             model_config, text="Enable augmentation on inference", variable=self.augment
         ).pack()
+        # model config END
 
-        bb_config_frame = ttk.LabelFrame(parent, text="Bounding boxes")
-        self.bb_config = LineConfigs(
-            bb_config_frame, color=consts.BBOXES_COLOR_DEFAULT, width=2
-        )
-        self.bb_config.pack()
-        bb_config_frame.pack()
-
-        # mark outside of bounds
-        outsider_config_frame = ttk.LabelFrame(parent, text="Outsiders")
-        self.outsider_config = LineConfigs(
-            outsider_config_frame, color=consts.OUTSIDER_COLOR_DEFAULT, width=2
-        )
-        self.outsider_thres = ZeroToOneScale(
-            self.outsider_config,
-            label="Min overlap %",
-            init=consts.OUTSIDE_THRES_DEFAULT,
-        )
-        self.outsider_thres.pack()
-        self.outsider_config.pack()
-        outsider_config_frame.pack()
-
-        # mask settings
-        mask_config = ttk.LabelFrame(parent, text="Mask")
+        # mask config BEGIN
+        mask_config_frame = ttk.LabelFrame(parent, text="Mask")
 
         self.enable_mask = tkinter.BooleanVar(value=False)
         ttk.Checkbutton(
-            mask_config, text="Apply mask as postprocess", variable=self.enable_mask
+            mask_config_frame,
+            text="Apply mask as postprocess",
+            variable=self.enable_mask,
         ).pack()
 
-        load_mask_frame = ttk.Frame(mask_config)
+        load_mask_frame = ttk.Frame(mask_config_frame)
         ttk.Button(load_mask_frame, text="Load mask", command=self.load_mask).pack(
             side=tkinter.LEFT
         )
@@ -408,30 +271,37 @@ class YoloV5InteractiveViewer:
         self.mask_name.pack(side=tkinter.LEFT)
         load_mask_frame.pack()
 
-        self.mask_thres = ZeroToOneScale(
-            mask_config, label="Min overlap %", init=consts.MASK_THRES_DEFAULT
-        )
-        self.mask_thres.pack()
-
-        mask_config.pack()
-
-        bounds_config_frame = ttk.LabelFrame(parent, text="Upper/Lower Bounds")
-        self.bounds_config = LineConfigs(
-            bounds_config_frame,
+        self.bounds_config = widgets.LineConfigs(
+            mask_config_frame,
             color=consts.BOUNDS_COLOR_DEFAULT,
             width=1,
         )
         self.bounds_config.pack()
-        bounds_config_frame.pack()
 
-        self.upper_pixel = IntEntry(
-            self.bounds_config, label="Up Px", init=consts.UPPER_BOUND_DEFAULT
+        self.mask_thres = widgets.ZeroToOneScale(
+            mask_config_frame, label="Min overlap %", init=consts.MASK_THRES_DEFAULT
         )
-        self.lower_pixel = IntEntry(
-            self.bounds_config, label="Lo Px", init=consts.LOWER_BOUND_DEFAULT
+        self.mask_thres.pack()
+
+        mask_config_frame.pack()
+        # mask config END
+
+        # bb config BEGIN
+        bb_config_frame = ttk.LabelFrame(parent, text="Bounding boxes")
+        self.bb_config = widgets.LineConfigs(
+            bb_config_frame, color=consts.BBOXES_COLOR_DEFAULT, width=2
         )
-        self.upper_pixel.pack()
-        self.lower_pixel.pack()
+        self.bb_config.pack()
+        bb_config_frame.pack()
+        # bb config END
+
+        # mark outside of the mask
+        outsider_config_frame = ttk.LabelFrame(parent, text="Outsiders")
+        self.outsider_config = widgets.LineConfigs(
+            outsider_config_frame, color=consts.OUTSIDER_COLOR_DEFAULT, width=2
+        )
+        self.outsider_config.pack()
+        outsider_config_frame.pack()
 
         misc_frame = ttk.LabelFrame(parent, text="Misc")
         misc_frame.pack()
@@ -448,15 +318,9 @@ class YoloV5InteractiveViewer:
             variable=self.show_confidence,
         ).pack()
 
-        # TODO: add to config
-        self.show_filename = tkinter.BooleanVar(value=True)
+        self.show_filename = tkinter.BooleanVar(value=False)
         ttk.Checkbutton(
             misc_frame, text="Show filename in the picture", variable=self.show_filename
-        ).pack()
-
-        self.disable_bounds = tkinter.BooleanVar(value=True)
-        ttk.Checkbutton(
-            misc_frame, text="Disable upper/lower bounds", variable=self.disable_bounds
         ).pack()
 
         ttk.Button(parent, text="Rerender", command=self.render_result).pack()
@@ -477,6 +341,8 @@ class YoloV5InteractiveViewer:
             self.image_view.create_image(0, 0, image=self.tk_image, anchor="nw")
 
     def load_model(self):
+        from yolov5.helpers import load_model
+
         filename = filedialog.askopenfilename(title="Choose Model")
         if filename == "":
             # canceled
@@ -484,7 +350,7 @@ class YoloV5InteractiveViewer:
 
         print(f"Load model {filename}")
         try:
-            self.model = yolov5.load(filename)
+            self.model = load_model(filename)
         except:
             traceback.print_exc()
             messagebox.showerror(message=f"Failed to load the model")

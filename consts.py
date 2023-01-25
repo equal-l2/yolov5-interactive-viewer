@@ -1,4 +1,5 @@
 from structs import RgbTuple
+from yolov5.models.common import AutoShape
 
 # YOLOv5 parameters, from the default value in detect.py
 CONFIDENCE_DEFAULT: float = 0.25
@@ -16,3 +17,6 @@ OUTSIDER_COLOR_DEFAULT: str = "#9900FF"  # purple
 
 # TODO: make configurable
 TEXT_COLOR: RgbTuple = (255, 0, 0)  # red
+
+# the type of model may change, as it is taken from internal implementation
+MODEL_TYPE = AutoShape

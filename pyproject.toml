@@ -22,3 +22,6 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.black]
 extend_exclude = "typings/.*"
+
+[tool.pyright]
+ignore = ["typings"]

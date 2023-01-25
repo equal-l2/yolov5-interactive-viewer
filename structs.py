@@ -1,6 +1,6 @@
 import typing
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Extra
 
 RgbTuple: typing.TypeAlias = tuple[int, int, int]
 
@@ -17,7 +17,7 @@ class LineParam:
         return iter((self.color, self.width))
 
 
-class AppConfig(BaseModel):
+class AppConfig(BaseModel, extra=Extra.ignore):
     confidence: float
     iou: float
     bb_color: RgbTuple
@@ -25,14 +25,10 @@ class AppConfig(BaseModel):
     show_confidence: bool
     outsider_color: RgbTuple
     outsider_width: int
-    outsider_thres: float
     hide_outsiders: bool
     bounds_color: RgbTuple
     bounds_width: int
-    upper_pixel: int
-    lower_pixel: int
-    disable_bounds: bool
     mask_thres: float
     augment: bool
-    # For compatibility
+    # Set the default, for compatibility
     augment = False

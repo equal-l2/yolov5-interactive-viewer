@@ -1,15 +1,19 @@
 import typing
 from typing import Optional, TypeAlias
 import cv2
-from structs import RgbTuple, AppConfig
 import numpy
 
+from structs import RgbTuple, AppConfig
+from consts import MODEL_TYPE
+
 Cv2Image: TypeAlias = cv2.Mat
-Model: TypeAlias = typing.Any
 DetectValues: TypeAlias = typing.Any
 
 
-def run_detect(model: Model, cv2_image: Cv2Image, config: AppConfig) -> DetectValues:
+def run_detect(
+    model: MODEL_TYPE, cv2_image: Cv2Image, config: AppConfig
+) -> DetectValues:
+    """Run detection on `cv2_image` using the model from `model`."""
     model.conf = config.confidence
     model.iou = config.iou
     detected = model(cv2_image, size=1280, augment=config.augment)
@@ -28,6 +32,7 @@ BBoxXyxy: typing.TypeAlias = tuple[tuple[int, int], tuple[int, int]]
 
 
 def compute_intersect(box1: BBoxXyxy, box2: BBoxXyxy) -> int:
+    """Compute the area of intersect between `box1` and `box2`"""
     max_of_x_min = max(box1[0][0], box2[0][0])
     max_of_y_min = max(box1[0][1], box2[0][1])
     min_of_x_max = min(box1[1][0], box2[1][0])
@@ -39,11 +44,6 @@ def compute_intersect(box1: BBoxXyxy, box2: BBoxXyxy) -> int:
     return intersect
 
 
-# cv2_image will be destructively changed
-# filename: if not None, the filename will be rendered on the image
-# mask: if not None, mask will be considered for bounding box elimination
-
-
 def draw_result(
     values: DetectValues,
     cv2_image: Cv2Image,
@@ -52,6 +52,10 @@ def draw_result(
     text_color: RgbTuple,
     config: AppConfig,
 ):
+    """Read detection results from `values` and draw them to `cv2_image` (destructive)
+    filename: if not None, the filename will be rendered on the image
+    mask: if not None, mask will be considered for bounding box elimination
+    """
     mask_overlay = True  # TODO: add config
     if mask is not None and mask_overlay:
         # draw the edge of the mask
@@ -70,7 +74,6 @@ def draw_result(
         )
 
     # draw bounding boxes and bounds
-    bounds = ((0, config.upper_pixel), (cv2_image.shape[1], config.lower_pixel))
     for row in values.itertuples():
         bb_area = (row.xmax - row.xmin) * (row.ymax - row.ymin)
 
@@ -78,28 +81,8 @@ def draw_result(
             # not sure if this can happen
             continue
 
-        is_outsider = False
-
-        # handle bounds
-        if not config.disable_bounds:
-            # compute the area of intersection
-            bb = ((row.xmin, row.ymin), (row.xmax, row.ymax))
-            intersect = compute_intersect(bounds, bb)
-            intersect_ratio = intersect / bb_area
-
-            if intersect_ratio < config.outsider_thres:
-                is_outsider = True
-
-            # draw bound rectangle
-            cv2.rectangle(
-                cv2_image,
-                (0, config.upper_pixel),
-                (cv2_image.shape[1], config.lower_pixel),
-                config.bounds_color,
-                config.bounds_width,
-            )
-
         # handle mask
+        is_outsider = False
         if mask is not None:
             mask_cropped = mask[row.ymin : row.ymax, row.xmin : row.xmax]
             whites = numpy.sum(mask_cropped == 255)

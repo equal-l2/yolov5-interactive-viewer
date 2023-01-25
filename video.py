@@ -86,9 +86,9 @@ def run(
 
     # sorry to be here, but for performance...
     print(f'[I] Load model from "{model_path}"')
-    import yolov5
+    from yolov5.helpers import load_model
 
-    model = yolov5.load(model_path)
+    model = load_model(model_path)
 
     print("[I] Start processing")
     t = tqdm.tqdm(total=frame_count)
