@@ -16,9 +16,9 @@ import consts
 import logic
 
 
-class LineConfigs(ttk.LabelFrame):
-    def __init__(self, root: tkinter.Misc, text: str, color: str, width: int):
-        ttk.LabelFrame.__init__(self, root, text=text)
+class LineConfigs(ttk.Frame):
+    def __init__(self, root: tkinter.Misc, color: str, width: int):
+        ttk.Frame.__init__(self, root)
 
         self.width_entry = IntEntry(self, label="Line width", init=width)
         self.width_entry.pack()
@@ -278,7 +278,7 @@ class YoloV5InteractiveViewer:
             lower_pixel=lower_pixel,
             disable_bounds=self.disable_bounds.get(),
             mask_thres=self.mask_thres.get(),
-            augment=self.augment.get()
+            augment=self.augment.get(),
         )
 
     def from_config(self, app_config: AppConfig):
@@ -371,14 +371,17 @@ class YoloV5InteractiveViewer:
             model_config, text="Enable augmentation on inference", variable=self.augment
         ).pack()
 
+        bb_config_frame = ttk.LabelFrame(parent, text="Bounding boxes")
         self.bb_config = LineConfigs(
-            parent, text="Bounding Boxes", color=consts.BBOXES_COLOR_DEFAULT, width=2
+            bb_config_frame, color=consts.BBOXES_COLOR_DEFAULT, width=2
         )
         self.bb_config.pack()
+        bb_config_frame.pack()
 
         # mark outside of bounds
+        outsider_config_frame = ttk.LabelFrame(parent, text="Outsiders")
         self.outsider_config = LineConfigs(
-            parent, text="Outsiders", color=consts.OUTSIDER_COLOR_DEFAULT, width=2
+            outsider_config_frame, color=consts.OUTSIDER_COLOR_DEFAULT, width=2
         )
         self.outsider_thres = ZeroToOneScale(
             self.outsider_config,
@@ -387,6 +390,7 @@ class YoloV5InteractiveViewer:
         )
         self.outsider_thres.pack()
         self.outsider_config.pack()
+        outsider_config_frame.pack()
 
         # mask settings
         mask_config = ttk.LabelFrame(parent, text="Mask")
@@ -411,13 +415,14 @@ class YoloV5InteractiveViewer:
 
         mask_config.pack()
 
+        bounds_config_frame = ttk.LabelFrame(parent, text="Upper/Lower Bounds")
         self.bounds_config = LineConfigs(
-            parent,
-            text="Upper/Lower Bounds",
+            bounds_config_frame,
             color=consts.BOUNDS_COLOR_DEFAULT,
             width=1,
         )
         self.bounds_config.pack()
+        bounds_config_frame.pack()
 
         self.upper_pixel = IntEntry(
             self.bounds_config, label="Up Px", init=consts.UPPER_BOUND_DEFAULT

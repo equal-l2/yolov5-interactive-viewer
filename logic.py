@@ -1,7 +1,7 @@
 import typing
 from typing import Optional, TypeAlias
 import cv2
-from structs import LineParam, RgbTuple, AppConfig
+from structs import RgbTuple, AppConfig
 import numpy
 
 Cv2Image: TypeAlias = cv2.Mat
@@ -56,7 +56,7 @@ def draw_result(
     if mask is not None and mask_overlay:
         # draw the edge of the mask
         mask_edge = cv2.Canny(mask, 10, 245)
-        cv2_image[mask_edge>0]=config.bounds_color
+        cv2_image[mask_edge > 0] = config.bounds_color
 
     if filename is not None:
         cv2.putText(
