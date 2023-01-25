@@ -443,6 +443,7 @@ class YoloV5InteractiveViewer:
             variable=self.show_confidence,
         ).pack()
 
+        # TODO: add to config
         self.show_filename = tkinter.BooleanVar(value=True)
         ttk.Checkbutton(
             misc_frame, text="Show filename in the picture", variable=self.show_filename

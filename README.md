@@ -6,3 +6,6 @@ Run inference on images interactively
 
 ## Bonus
 `video.py` can bulk-infer on a video, using the config file exported from viewer (`main.py`).
+
+## TODO
+Remove upper/lower bounds (replaced with mask)
