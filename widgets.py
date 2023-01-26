@@ -2,11 +2,12 @@ from PIL import ImageColor
 from tkinter import ttk, colorchooser
 import tkinter
 import traceback
+import typing
 
 from structs import RgbTuple, LineParam
 
 
-class LineConfigs(ttk.Frame):
+class LineConfig(ttk.Frame):
     def __init__(self, root: tkinter.Misc, color: str, width: int):
         ttk.Frame.__init__(self, root)
 
@@ -106,3 +107,16 @@ class ZeroToOneScale(tkinter.Scale):
             orient=tkinter.HORIZONTAL,
         )
         self.set(init)
+
+
+class LoadFileButton(ttk.Frame):
+    def __init__(
+        self, root: tkinter.Misc, text: str, command: typing.Callable[[], typing.Any]
+    ):
+        ttk.Frame.__init__(self, root)
+        ttk.Button(self, text=text, command=command).pack(side=tkinter.LEFT)
+        self.filename_label = ttk.Label(self)
+        self.filename_label.pack(side=tkinter.LEFT)
+
+    def set_filename(self, name: str):
+        self.filename_label["text"] = name

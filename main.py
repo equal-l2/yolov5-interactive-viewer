@@ -10,10 +10,36 @@ import typing
 
 import cv2
 
-from structs import AppConfig
+from structs import AppConfig, ModelParam
 import consts
 import logic
-import widgets
+from widgets import ZeroToOneScale, LoadFileButton, LineConfig
+
+
+class ModelParamControl(ttk.Frame):
+    def __init__(self, root: tkinter.Misc):
+        ttk.Frame.__init__(self, root)
+
+        self.confidence = ZeroToOneScale(
+            self, label="Confidence", init=consts.CONFIDENCE_DEFAULT
+        )
+        self.confidence.pack()
+
+        self.iou = ZeroToOneScale(self, label="IoU", init=consts.IOU_DEFAULT)
+        self.iou.pack()
+
+        self.augment = tkinter.BooleanVar(value=False)
+        ttk.Checkbutton(
+            self, text="Enable augmentation on inference", variable=self.augment
+        ).pack()
+
+    def get(self) -> ModelParam:
+        return ModelParam(self.confidence.get(), self.iou.get(), self.augment.get())
+
+    def set(self, confidence: float, iou: float, augment: bool):
+        self.confidence.set(confidence)
+        self.iou.set(iou)
+        self.augment.set(augment)
 
 
 class YoloV5InteractiveViewer:
@@ -100,9 +126,9 @@ class YoloV5InteractiveViewer:
 
         ttk.Separator(parent, orient=tkinter.HORIZONTAL).pack()
 
-        ttk.Button(parent, text="Save picture", command=self.save).pack()
+        ttk.Button(parent, text="Save picture", command=self.save_image).pack()
 
-    def save(self):
+    def save_image(self):
         if self.image_index >= len(self.realpathes) or self.pil_image is None:
             return
 
@@ -142,13 +168,16 @@ class YoloV5InteractiveViewer:
         bounds_params = self.bounds_config.get()
         if bounds_params is None:
             messagebox.showerror(
-                message="Upper/Lower Bounds: Line width must be a positive interger"
+                message="Bounds: Line width must be a positive interger"
             )
             return None
 
+        model_param = self.model_param_control.get()
+
         return AppConfig(
-            confidence=self.confidence.get(),
-            iou=self.iou.get(),
+            confidence=model_param.confidence,
+            iou=model_param.iou,
+            augment=model_param.augment,
             bb_color=bb_params.color,
             bb_width=bb_params.width,
             show_confidence=self.show_confidence.get(),
@@ -158,27 +187,30 @@ class YoloV5InteractiveViewer:
             bounds_color=bounds_params.color,
             bounds_width=bounds_params.width,
             mask_thres=self.mask_thres.get(),
-            augment=self.augment.get(),
         )
 
     def from_config(self, app_config: AppConfig):
-        self.confidence.set(app_config.confidence)
-        self.iou.set(app_config.iou)
+        self.model_param_control.set(
+            app_config.confidence, app_config.iou, app_config.augment
+        )
+
         self.bb_config.set(
             color=logic.rgb2hex(app_config.bb_color), width=app_config.bb_width
         )
-        self.show_confidence.set(app_config.show_confidence)
+
         self.outsider_config.set(
             color=logic.rgb2hex(app_config.outsider_color),
             width=app_config.outsider_width,
         )
-        self.hide_outsiders.set(app_config.hide_outsiders)
+
         self.bounds_config.set(
             color=logic.rgb2hex(app_config.bounds_color),
             width=app_config.bounds_width,
         )
         self.mask_thres.set(app_config.mask_thres)
-        self.augment.set(app_config.augment)
+
+        self.hide_outsiders.set(app_config.hide_outsiders)
+        self.show_confidence.set(app_config.show_confidence)
 
     def export_config(self):
         real_new_name = filedialog.asksaveasfilename(initialfile="config.json")
@@ -229,28 +261,13 @@ class YoloV5InteractiveViewer:
         model_config = ttk.LabelFrame(parent, text="Model")
         model_config.pack()
 
-        load_model_frame = ttk.Frame(model_config)
-        ttk.Button(load_model_frame, text="Load model", command=self.load_model).pack(
-            side=tkinter.LEFT
+        self.load_model_button = LoadFileButton(
+            model_config, "Load model", self.load_model
         )
-        self.model_name = ttk.Label(load_model_frame)
-        self.model_name.pack(side=tkinter.LEFT)
-        load_model_frame.pack()
+        self.load_model_button.pack()
 
-        self.confidence = widgets.ZeroToOneScale(
-            model_config, label="Confidence", init=consts.CONFIDENCE_DEFAULT
-        )
-        self.confidence.pack()
-
-        self.iou = widgets.ZeroToOneScale(
-            model_config, label="IoU", init=consts.IOU_DEFAULT
-        )
-        self.iou.pack()
-
-        self.augment = tkinter.BooleanVar(value=False)
-        ttk.Checkbutton(
-            model_config, text="Enable augmentation on inference", variable=self.augment
-        ).pack()
+        self.model_param_control = ModelParamControl(model_config)
+        self.model_param_control.pack()
         # model config END
 
         # mask config BEGIN
@@ -263,22 +280,19 @@ class YoloV5InteractiveViewer:
             variable=self.enable_mask,
         ).pack()
 
-        load_mask_frame = ttk.Frame(mask_config_frame)
-        ttk.Button(load_mask_frame, text="Load mask", command=self.load_mask).pack(
-            side=tkinter.LEFT
+        self.load_mask_button = LoadFileButton(
+            mask_config_frame, "Load mask", self.load_mask
         )
-        self.mask_name = ttk.Label(load_mask_frame)
-        self.mask_name.pack(side=tkinter.LEFT)
-        load_mask_frame.pack()
+        self.load_mask_button.pack()
 
-        self.bounds_config = widgets.LineConfigs(
+        self.bounds_config = LineConfig(
             mask_config_frame,
             color=consts.BOUNDS_COLOR_DEFAULT,
             width=1,
         )
         self.bounds_config.pack()
 
-        self.mask_thres = widgets.ZeroToOneScale(
+        self.mask_thres = ZeroToOneScale(
             mask_config_frame, label="Min overlap %", init=consts.MASK_THRES_DEFAULT
         )
         self.mask_thres.pack()
@@ -288,7 +302,7 @@ class YoloV5InteractiveViewer:
 
         # bb config BEGIN
         bb_config_frame = ttk.LabelFrame(parent, text="Bounding boxes")
-        self.bb_config = widgets.LineConfigs(
+        self.bb_config = LineConfig(
             bb_config_frame, color=consts.BBOXES_COLOR_DEFAULT, width=2
         )
         self.bb_config.pack()
@@ -297,7 +311,7 @@ class YoloV5InteractiveViewer:
 
         # mark outside of the mask
         outsider_config_frame = ttk.LabelFrame(parent, text="Outsiders")
-        self.outsider_config = widgets.LineConfigs(
+        self.outsider_config = LineConfig(
             outsider_config_frame, color=consts.OUTSIDER_COLOR_DEFAULT, width=2
         )
         self.outsider_config.pack()
@@ -330,6 +344,7 @@ class YoloV5InteractiveViewer:
         ttk.Button(parent, text="Run Detection", command=self.run_detect).pack()
 
     def fit_image(self):
+        """scale the shown image to fit to the window"""
         if self.pil_image is not None:
             width = self.image_view.winfo_width()
             height = self.image_view.winfo_height()
@@ -356,7 +371,7 @@ class YoloV5InteractiveViewer:
             messagebox.showerror(message=f"Failed to load the model")
             return
 
-        self.model_name["text"] = os.path.basename(filename)
+        self.load_model_button.set_filename(os.path.basename(filename))
 
     def load_mask(self):
         filename = filedialog.askopenfilename(title="Choose Mask")
@@ -372,7 +387,7 @@ class YoloV5InteractiveViewer:
             return
 
         self.mask = mask
-        self.mask_name["text"] = os.path.basename(filename)
+        self.load_mask_button.set_filename(os.path.basename(filename))
 
     def load_folder(self):
         if self.model is None:

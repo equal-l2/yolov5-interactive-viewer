@@ -1,15 +1,6 @@
 #!/usr/bin/env python3
-
-from os.path import exists
 import argparse
-import json
-import sys
-
-import tqdm
-
 from structs import AppConfig, RgbTuple
-import logic
-from consts import TEXT_COLOR
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--src", required=True)
@@ -35,6 +26,12 @@ def config_to_bgr(config: AppConfig):
 def run(
     src_path: str, dst_path: str, config_path: str, model_path: str, mask_path: str
 ):
+    from os.path import exists
+    import json
+
+    import logic
+    from consts import TEXT_COLOR
+
     print(f'[I] Load config from "{config_path}"')
     with open(config_path, "r") as f:
         config_json = json.load(f)
@@ -90,6 +87,8 @@ def run(
 
     model = load_model(model_path)
 
+    import tqdm
+
     print("[I] Start processing")
     t = tqdm.tqdm(total=frame_count)
     while True:
@@ -121,4 +120,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     status = run(args.src, args.dst, args.config, args.model, args.mask)
     if status != 0:
+        import sys
+
         sys.exit(status)

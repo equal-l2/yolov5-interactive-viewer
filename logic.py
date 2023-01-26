@@ -16,7 +16,8 @@ def run_detect(
     """Run detection on `cv2_image` using the model from `model`."""
     model.conf = config.confidence
     model.iou = config.iou
-    detected = model(cv2_image, size=1280, augment=config.augment)
+    IMG_SIZE = 1280 # TODO: make configurable?
+    detected = model(cv2_image, size=IMG_SIZE, augment=config.augment)
 
     values = detected.pandas().xyxy[0]
 

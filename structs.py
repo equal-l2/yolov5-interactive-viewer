@@ -1,4 +1,5 @@
 import typing
+from dataclasses import dataclass
 
 from pydantic import BaseModel, Extra
 
@@ -20,15 +21,22 @@ class LineParam:
 class AppConfig(BaseModel, extra=Extra.ignore):
     confidence: float
     iou: float
+    augment: bool
     bb_color: RgbTuple
     bb_width: int
-    show_confidence: bool
     outsider_color: RgbTuple
     outsider_width: int
-    hide_outsiders: bool
     bounds_color: RgbTuple
     bounds_width: int
     mask_thres: float
-    augment: bool
+    show_confidence: bool
+    hide_outsiders: bool
     # Set the default, for compatibility
     augment = False
+
+
+@dataclass
+class ModelParam:
+    confidence: float
+    iou: float
+    augment: bool
