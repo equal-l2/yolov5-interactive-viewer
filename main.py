@@ -10,7 +10,7 @@ import typing
 
 import cv2
 
-from structs import AppConfig, ModelParam
+from structs import AppConfig, ModelParam, ViewerInitConfig
 import consts
 import logic
 from widgets import ZeroToOneScale, LoadFileButton, LineConfig
@@ -43,7 +43,9 @@ class ModelParamControl(ttk.Frame):
 
 
 class YoloV5InteractiveViewer:
-    def __init__(self, root: tkinter.Misc):
+    def __init__(
+        self, root: tkinter.Misc, init_config: typing.Optional[ViewerInitConfig]
+    ):
         mainframe = ttk.Frame(root)
         mainframe.grid(column=0, row=0, sticky=tkinter.NSEW)
 
@@ -74,6 +76,17 @@ class YoloV5InteractiveViewer:
 
         self.configure_left_sidebar()
         self.configure_right_sidebar()
+
+        if init_config is not None:
+            self.handle_init_config(init_config)
+
+    def handle_init_config(self, init_config: ViewerInitConfig):
+        if init_config.model_path is not None:
+            self.load_model(init_config.model_path)
+        if init_config.mask_path is not None:
+            self.load_mask(init_config.mask_path)
+        if init_config.config_path is not None:
+            self.import_config(init_config.config_path)
 
     def _update_image_index(self, new_index: int):
         self.image_index = new_index
@@ -224,27 +237,28 @@ class YoloV5InteractiveViewer:
             if app_config is None:
                 return
             with open(real_new_name, "w") as f:
-                f.write(app_config.json())
+                f.write(app_config.json(indent=2))
             messagebox.showinfo(message=f"Successfully saved to {real_new_name}")
         except:
             traceback.print_exc()
             messagebox.showinfo(message=f"Failed to save to {real_new_name}")
 
-    def import_config(self):
+    def config_import_dialog(self):
         filename = filedialog.askopenfilename(
             title="Choose config", filetypes=[("json", "*.json")]
         )
         if filename == "":
             # canceled
             return
+        self.import_config(filename)
 
+    def import_config(self, filename: str):
         try:
             with open(filename, "r") as f:
                 config_json = json.load(f)
             app_config = AppConfig.parse_obj(config_json)
 
             self.from_config(app_config)
-            messagebox.showinfo(message=f"Successfully loaded from {filename}")
         except:
             traceback.print_exc()
             messagebox.showerror(message=f"Failed to load config")
@@ -254,7 +268,9 @@ class YoloV5InteractiveViewer:
 
         config_io = ttk.LabelFrame(parent, text="Config")
         ttk.Button(config_io, text="Export config", command=self.export_config).pack()
-        ttk.Button(config_io, text="Import config", command=self.import_config).pack()
+        ttk.Button(
+            config_io, text="Import config", command=self.config_import_dialog
+        ).pack()
         config_io.pack()
 
         # model config BEGIN
@@ -262,7 +278,7 @@ class YoloV5InteractiveViewer:
         model_config.pack()
 
         self.load_model_button = LoadFileButton(
-            model_config, "Load model", self.load_model
+            model_config, "Load model", self.model_load_dialog
         )
         self.load_model_button.pack()
 
@@ -281,7 +297,7 @@ class YoloV5InteractiveViewer:
         ).pack()
 
         self.load_mask_button = LoadFileButton(
-            mask_config_frame, "Load mask", self.load_mask
+            mask_config_frame, "Load mask", self.mask_load_dialog
         )
         self.load_mask_button.pack()
 
@@ -320,7 +336,7 @@ class YoloV5InteractiveViewer:
         misc_frame = ttk.LabelFrame(parent, text="Misc")
         misc_frame.pack()
 
-        self.hide_outsiders = tkinter.BooleanVar(value=False)
+        self.hide_outsiders = tkinter.BooleanVar(value=True)
         ttk.Checkbutton(
             misc_frame, text="Hide outsiders", variable=self.hide_outsiders
         ).pack()
@@ -355,13 +371,16 @@ class YoloV5InteractiveViewer:
             self.image_view.delete("all")
             self.image_view.create_image(0, 0, image=self.tk_image, anchor="nw")
 
-    def load_model(self):
-        from yolov5.helpers import load_model
-
+    def model_load_dialog(self):
         filename = filedialog.askopenfilename(title="Choose Model")
         if filename == "":
             # canceled
             return
+
+        self.load_model(filename)
+
+    def load_model(self, filename: str):
+        from yolov5.helpers import load_model
 
         print(f"Load model {filename}")
         try:
@@ -373,12 +392,14 @@ class YoloV5InteractiveViewer:
 
         self.load_model_button.set_filename(os.path.basename(filename))
 
-    def load_mask(self):
+    def mask_load_dialog(self):
         filename = filedialog.askopenfilename(title="Choose Mask")
         if filename == "":
             # canceled
             return
+        self.load_mask(filename)
 
+    def load_mask(self, filename: str):
         print(f"Load mask {filename}")
         mask = cv2.imread(filename, cv2.IMREAD_GRAYSCALE)
         if mask is None:
@@ -388,6 +409,7 @@ class YoloV5InteractiveViewer:
 
         self.mask = mask
         self.load_mask_button.set_filename(os.path.basename(filename))
+        self.enable_mask.set(True)
 
     def load_folder(self):
         if self.model is None:
@@ -505,6 +527,17 @@ root.title("YOLOv5 Interactive Viewer")
 root.columnconfigure(0, weight=1)
 root.rowconfigure(0, weight=1)
 
-view = YoloV5InteractiveViewer(root)
+init_config = None
+if os.path.isfile("init.json"):
+    try:
+        with open("init.json", "r") as f:
+            config_json = json.load(f)
+        init_config = ViewerInitConfig.parse_obj(config_json)
+    except:
+        traceback.print_exc()
+        messagebox.showerror(message=f"Failed to load init config")
+
+
+view = YoloV5InteractiveViewer(root, init_config)
 print("Initialized")
 root.mainloop()

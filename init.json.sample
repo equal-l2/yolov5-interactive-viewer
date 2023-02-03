@@ -1,0 +1,5 @@
+{
+    "model_path": "./model.pt",
+    "mask_path": "./mask.png",
+    "config_path": "./config.json"
+}

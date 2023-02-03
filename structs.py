@@ -35,6 +35,15 @@ class AppConfig(BaseModel, extra=Extra.ignore):
     augment = False
 
 
+OptionalPath = typing.Optional[str]
+
+
+class ViewerInitConfig(BaseModel, extra=Extra.ignore):
+    model_path: OptionalPath
+    mask_path: OptionalPath
+    config_path: OptionalPath
+
+
 @dataclass
 class ModelParam:
     confidence: float
