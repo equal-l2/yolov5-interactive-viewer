@@ -1,5 +1,5 @@
 import typing
-from typing import Optional, TypeAlias
+from typing import Optional, TypeAlias, Final
 import cv2
 import numpy
 
@@ -8,6 +8,26 @@ from consts import MODEL_TYPE
 
 Cv2Image: TypeAlias = cv2.Mat
 DetectValues: TypeAlias = typing.Any
+
+
+class Mask:
+    img: Final[Cv2Image]
+    contours: Final[typing.Any]
+
+    def __init__(self, img_input: Cv2Image):
+        """
+        input: must be a grayscale image
+        """
+
+        img = img_input.copy()
+
+        # convert grayscale to black/white
+        cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU, dst=img)
+
+        contours, _ = cv2.findContours(img, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+
+        self.img = img
+        self.contours = contours
 
 
 def run_detect(
@@ -49,7 +69,7 @@ def draw_result(
     values: DetectValues,
     cv2_image: Cv2Image,
     filename: Optional[str],
-    mask: Optional[Cv2Image],
+    mask: Optional[Mask],
     text_color: RgbTuple,
     config: AppConfig,
 ):
@@ -57,11 +77,14 @@ def draw_result(
     filename: if not None, the filename will be rendered on the image
     mask: if not None, mask will be considered for bounding box elimination
     """
-    mask_overlay = True  # TODO: add config
-    if mask is not None and mask_overlay:
-        # draw the edge of the mask
-        mask_edge = cv2.Canny(mask, 10, 245)
-        cv2_image[mask_edge > 0] = config.bounds_color
+    if mask is not None and config.show_mask_border:
+        cv2.drawContours(
+            cv2_image,
+            mask.contours,
+            -1,
+            config.mask_border_color,
+            thickness=config.mask_border_width,
+        )
 
     if filename is not None:
         cv2.putText(
@@ -85,7 +108,7 @@ def draw_result(
         # handle mask
         is_outsider = False
         if mask is not None:
-            mask_cropped = mask[row.ymin : row.ymax, row.xmin : row.xmax]
+            mask_cropped = mask.img[row.ymin : row.ymax, row.xmin : row.xmax]
             whites = numpy.sum(mask_cropped == 255)
             mask_intersect_ratio = whites / bb_area
             if mask_intersect_ratio < config.mask_thres:
@@ -94,9 +117,9 @@ def draw_result(
         box_color = config.outsider_color if is_outsider else config.bb_color
         box_width = config.outsider_width if is_outsider else config.bb_width
 
-        hide_detect = config.hide_outsiders and is_outsider
+        show_detect = config.show_outsiders or not is_outsider
 
-        if not hide_detect:
+        if show_detect:
             cv2.rectangle(
                 cv2_image,
                 (row.xmin, row.ymin),

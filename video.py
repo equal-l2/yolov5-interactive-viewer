@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 from structs import AppConfig, RgbTuple
+from consts import MODEL_TYPE
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--src", required=True)
@@ -19,7 +20,7 @@ def to_bgr(rgb: RgbTuple) -> tuple[int, int, int]:
 def config_to_bgr(config: AppConfig):
     config.bb_color = to_bgr(config.bb_color)
     config.outsider_color = to_bgr(config.outsider_color)
-    config.bounds_color = to_bgr(config.bounds_color)
+    config.mask_border_color = to_bgr(config.mask_border_color)
     return config
 
 
@@ -46,10 +47,11 @@ def run(
         mask = None
     else:
         print(f'[I] Load mask from "{mask_path}"')
-        mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-        if mask is None:
+        mask_img = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+        if mask_img is None:
             print("[F] Failed to load mask")
             return -1
+        mask = logic.Mask(mask_img)
 
     # For other OSes than macOS, cv2.CAP_FFMPEG can be used
     CV2_API_PREFERENCE = cv2.CAP_AVFOUNDATION
@@ -85,7 +87,7 @@ def run(
     print(f'[I] Load model from "{model_path}"')
     from yolov5.helpers import load_model
 
-    model = load_model(model_path)
+    model: MODEL_TYPE = load_model(model_path)
 
     import tqdm
 

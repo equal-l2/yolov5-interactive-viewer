@@ -7,30 +7,44 @@ import os
 import tkinter
 import traceback
 import typing
+from typing import Optional
 
 import cv2
 
 from structs import AppConfig, ModelParam, ViewerInitConfig
 import consts
 import logic
-from widgets import ZeroToOneScale, LoadFileButton, LineConfig
+from widgets import ZeroToOneScale, LoadFileButton, LineConfig, TkCommand
 
 
 class ModelParamControl(ttk.Frame):
-    def __init__(self, root: tkinter.Misc):
+    confidence: ZeroToOneScale
+    iou: ZeroToOneScale
+    augment: tkinter.BooleanVar
+
+    command: TkCommand
+
+    def __init__(self, root: tkinter.Misc, *, command: TkCommand = None):
         ttk.Frame.__init__(self, root)
 
+        self.command = command
+
         self.confidence = ZeroToOneScale(
-            self, label="Confidence", init=consts.CONFIDENCE_DEFAULT
+            self, label="Confidence", init=consts.CONFIDENCE_DEFAULT, command=command
         )
         self.confidence.pack()
 
-        self.iou = ZeroToOneScale(self, label="IoU", init=consts.IOU_DEFAULT)
+        self.iou = ZeroToOneScale(
+            self, label="IoU", init=consts.IOU_DEFAULT, command=command
+        )
         self.iou.pack()
 
         self.augment = tkinter.BooleanVar(value=False)
         ttk.Checkbutton(
-            self, text="Enable augmentation on inference", variable=self.augment
+            self,
+            text="Enable augmentation on inference",
+            variable=self.augment,
+            command=self._button_command,
         ).pack()
 
     def get(self) -> ModelParam:
@@ -41,41 +55,63 @@ class ModelParamControl(ttk.Frame):
         self.iou.set(iou)
         self.augment.set(augment)
 
+    def _button_command(self):
+        if self.command is not None:
+            self.command()
+
 
 class YoloV5InteractiveViewer:
-    def __init__(
-        self, root: tkinter.Misc, init_config: typing.Optional[ViewerInitConfig]
-    ):
+    # internal states
+    model: Optional[consts.MODEL_TYPE] = None
+    realpathes: list[str] = []
+    image_index: int = 0
+    mask: Optional[logic.Mask] = None
+    cv2_image: Optional[logic.Cv2Image]
+    pil_image: Optional[Image.Image]
+    values: logic.DetectValues
+
+    # tk objects
+    image_view: tkinter.Canvas
+    tk_image: Optional[ImageTk.PhotoImage] = None
+    file_list: tkinter.Listbox
+    load_model_button: LoadFileButton
+    model_param_control: ModelParamControl
+    load_mask_button: LoadFileButton
+    mask_border_config: LineConfig
+    mask_thres: ZeroToOneScale
+    bb_config: LineConfig
+    outsider_config: LineConfig
+
+    # tk string variables
+    enable_mask: tkinter.BooleanVar
+    show_mask_border: tkinter.BooleanVar
+    show_outsiders: tkinter.BooleanVar
+    show_confidence: tkinter.BooleanVar
+    show_filename: tkinter.BooleanVar
+
+    def __init__(self, root: tkinter.Misc, init_config: Optional[ViewerInitConfig]):
         mainframe = ttk.Frame(root)
         mainframe.grid(column=0, row=0, sticky=tkinter.NSEW)
 
         # place widgets
-        self.left_sidebar = ttk.Frame(mainframe)
-        self.left_sidebar.grid(column=0, row=0, sticky=tkinter.NS + tkinter.W)
-        self.left_sidebar["borderwidth"] = 1
+        left_sidebar = ttk.Frame(mainframe)
+        left_sidebar.grid(column=0, row=0, sticky=tkinter.NS + tkinter.W)
+        left_sidebar["borderwidth"] = 1
 
         self.image_view = tkinter.Canvas(mainframe)
         self.image_view.grid(column=1, row=0, sticky=tkinter.NSEW)
         self.image_view.configure(bg="gray")
 
-        self.right_sidebar = ttk.Frame(mainframe)
-        self.right_sidebar.grid(column=2, row=0, sticky=tkinter.NS + tkinter.E)
-        self.right_sidebar["borderwidth"] = 1
+        right_sidebar = ttk.Frame(mainframe)
+        right_sidebar.grid(column=2, row=0, sticky=tkinter.NS + tkinter.E)
+        right_sidebar["borderwidth"] = 1
 
         # configureしないと伸びない
         mainframe.columnconfigure(1, weight=10)
         mainframe.rowconfigure(0, weight=1)
 
-        self.tk_image = None  # need to be alive
-        self.model: typing.Optional[consts.MODEL_TYPE] = None
-        self.pil_image = None
-        self.realpathes: list[str] = []
-        self.image_index: int = 0
-        self.file_list = None
-        self.mask = None
-
-        self.configure_left_sidebar()
-        self.configure_right_sidebar()
+        self.configure_left_sidebar(left_sidebar)
+        self.configure_right_sidebar(right_sidebar)
 
         if init_config is not None:
             self.handle_init_config(init_config)
@@ -93,9 +129,6 @@ class YoloV5InteractiveViewer:
         self.run_detect()
 
     def set_image_index(self, new_index: int):
-        if self.file_list is None:
-            return
-
         file_list = self.file_list
         if 0 <= new_index and new_index < file_list.size():
             file_list.see(new_index)
@@ -103,10 +136,11 @@ class YoloV5InteractiveViewer:
             file_list.selection_set(new_index)
             self._update_image_index(new_index)
 
-    def configure_left_sidebar(self):
-        parent = self.left_sidebar
+    def configure_left_sidebar(self, parent: tkinter.Misc):
+        # load folder button
         ttk.Button(parent, text="Load folder", command=self.load_folder).pack()
 
+        # file list
         def on_list_selected(e: typing.Any):
             select = e.widget.curselection()
             if len(select) < 1:
@@ -117,16 +151,14 @@ class YoloV5InteractiveViewer:
         self.file_list.pack()
         self.file_list.bind("<<ListboxSelect>>", on_list_selected)
 
+        # next/prev button
         def modify_index(delta: int):
-            if self.file_list is None:
-                return
-            file_list = self.file_list
-            select = file_list.curselection()
+            select = self.file_list.curselection()
             if len(select) < 1:
                 return
-            current = select[0]
-            next = current + delta
-            self.set_image_index(next)
+            current_idx: int = select[0]
+            next_idx = current_idx + delta
+            self.set_image_index(next_idx)
 
         nav_frame = ttk.Frame(parent)
         ttk.Button(nav_frame, text="<-", command=lambda: modify_index(-1)).grid(
@@ -139,6 +171,7 @@ class YoloV5InteractiveViewer:
 
         ttk.Separator(parent, orient=tkinter.HORIZONTAL).pack()
 
+        # save picture button
         ttk.Button(parent, text="Save picture", command=self.save_image).pack()
 
     def save_image(self):
@@ -162,29 +195,10 @@ class YoloV5InteractiveViewer:
             traceback.print_exc()
             messagebox.showinfo(message=f"Failed to save to {real_new_name}")
 
-    def get_config(self) -> typing.Optional[AppConfig]:
-        # check params
+    def get_config(self) -> Optional[AppConfig]:
         bb_params = self.bb_config.get()
-        if bb_params is None:
-            messagebox.showerror(
-                message="Bounding Boxes: Line width must be a positive interger"
-            )
-            return None
-
         outsider_params = self.outsider_config.get()
-        if outsider_params is None:
-            messagebox.showerror(
-                message="Outsiders: Line width must be a positive interger"
-            )
-            return None
-
-        bounds_params = self.bounds_config.get()
-        if bounds_params is None:
-            messagebox.showerror(
-                message="Bounds: Line width must be a positive interger"
-            )
-            return None
-
+        mask_border_params = self.mask_border_config.get()
         model_param = self.model_param_control.get()
 
         return AppConfig(
@@ -193,13 +207,14 @@ class YoloV5InteractiveViewer:
             augment=model_param.augment,
             bb_color=bb_params.color,
             bb_width=bb_params.width,
-            show_confidence=self.show_confidence.get(),
+            show_outsiders=self.show_outsiders.get(),
             outsider_color=outsider_params.color,
             outsider_width=outsider_params.width,
-            hide_outsiders=self.hide_outsiders.get(),
-            bounds_color=bounds_params.color,
-            bounds_width=bounds_params.width,
             mask_thres=self.mask_thres.get(),
+            show_mask_border=self.show_mask_border.get(),
+            mask_border_color=mask_border_params.color,
+            mask_border_width=mask_border_params.width,
+            show_confidence=self.show_confidence.get(),
         )
 
     def from_config(self, app_config: AppConfig):
@@ -211,18 +226,19 @@ class YoloV5InteractiveViewer:
             color=logic.rgb2hex(app_config.bb_color), width=app_config.bb_width
         )
 
+        self.show_outsiders.set(app_config.show_outsiders)
         self.outsider_config.set(
             color=logic.rgb2hex(app_config.outsider_color),
             width=app_config.outsider_width,
         )
 
-        self.bounds_config.set(
-            color=logic.rgb2hex(app_config.bounds_color),
-            width=app_config.bounds_width,
-        )
         self.mask_thres.set(app_config.mask_thres)
+        self.show_mask_border.set(app_config.show_mask_border)
+        self.mask_border_config.set(
+            color=logic.rgb2hex(app_config.mask_border_color),
+            width=app_config.mask_border_width,
+        )
 
-        self.hide_outsiders.set(app_config.hide_outsiders)
         self.show_confidence.set(app_config.show_confidence)
 
     def export_config(self):
@@ -263,9 +279,7 @@ class YoloV5InteractiveViewer:
             traceback.print_exc()
             messagebox.showerror(message=f"Failed to load config")
 
-    def configure_right_sidebar(self):
-        parent = self.right_sidebar
-
+    def configure_right_sidebar(self, parent: tkinter.Misc):
         config_io = ttk.LabelFrame(parent, text="Config")
         ttk.Button(config_io, text="Export config", command=self.export_config).pack()
         ttk.Button(
@@ -273,20 +287,19 @@ class YoloV5InteractiveViewer:
         ).pack()
         config_io.pack()
 
-        # model config BEGIN
+        # model config
         model_config = ttk.LabelFrame(parent, text="Model")
         model_config.pack()
 
         self.load_model_button = LoadFileButton(
-            model_config, "Load model", self.model_load_dialog
+            model_config, "Load model", command=self.model_load_dialog
         )
         self.load_model_button.pack()
 
         self.model_param_control = ModelParamControl(model_config)
         self.model_param_control.pack()
-        # model config END
 
-        # mask config BEGIN
+        # mask config
         mask_config_frame = ttk.LabelFrame(parent, text="Mask")
 
         self.enable_mask = tkinter.BooleanVar(value=False)
@@ -297,19 +310,26 @@ class YoloV5InteractiveViewer:
         ).pack()
 
         self.load_mask_button = LoadFileButton(
-            mask_config_frame, "Load mask", self.mask_load_dialog
+            mask_config_frame, "Load mask", command=self.mask_load_dialog
         )
         self.load_mask_button.pack()
 
-        self.bounds_config = LineConfig(
+        self.show_mask_border = tkinter.BooleanVar(value=True)
+        ttk.Checkbutton(
+            mask_config_frame,
+            text="Show borders of the mask",
+            variable=self.show_mask_border,
+        ).pack()
+
+        self.mask_border_config = LineConfig(
             mask_config_frame,
             color=consts.BOUNDS_COLOR_DEFAULT,
-            width=1,
+            width=consts.BOUNDS_WIDTH_DEFAULT,
         )
-        self.bounds_config.pack()
+        self.mask_border_config.pack()
 
         self.mask_thres = ZeroToOneScale(
-            mask_config_frame, label="Min overlap %", init=consts.MASK_THRES_DEFAULT
+            mask_config_frame, label="Threshold", init=consts.MASK_THRES_DEFAULT
         )
         self.mask_thres.pack()
 
@@ -319,7 +339,9 @@ class YoloV5InteractiveViewer:
         # bb config BEGIN
         bb_config_frame = ttk.LabelFrame(parent, text="Bounding boxes")
         self.bb_config = LineConfig(
-            bb_config_frame, color=consts.BBOXES_COLOR_DEFAULT, width=2
+            bb_config_frame,
+            color=consts.BBOXES_COLOR_DEFAULT,
+            width=consts.BBOXES_WIDTH_DEFAULT,
         )
         self.bb_config.pack()
         bb_config_frame.pack()
@@ -327,19 +349,22 @@ class YoloV5InteractiveViewer:
 
         # mark outside of the mask
         outsider_config_frame = ttk.LabelFrame(parent, text="Outsiders")
+
+        self.show_outsiders = tkinter.BooleanVar(value=False)
+        ttk.Checkbutton(
+            outsider_config_frame, text="Show outsiders", variable=self.show_outsiders
+        ).pack()
+
         self.outsider_config = LineConfig(
-            outsider_config_frame, color=consts.OUTSIDER_COLOR_DEFAULT, width=2
+            outsider_config_frame,
+            color=consts.OUTSIDER_COLOR_DEFAULT,
+            width=consts.OUTSIDER_WIDTH_DEFAULT,
         )
         self.outsider_config.pack()
         outsider_config_frame.pack()
 
         misc_frame = ttk.LabelFrame(parent, text="Misc")
         misc_frame.pack()
-
-        self.hide_outsiders = tkinter.BooleanVar(value=True)
-        ttk.Checkbutton(
-            misc_frame, text="Hide outsiders", variable=self.hide_outsiders
-        ).pack()
 
         self.show_confidence = tkinter.BooleanVar(value=False)
         ttk.Checkbutton(
@@ -387,7 +412,7 @@ class YoloV5InteractiveViewer:
             self.model = load_model(filename)
         except:
             traceback.print_exc()
-            messagebox.showerror(message=f"Failed to load the model")
+            messagebox.showerror(message="Failed to load the model")
             return
 
         self.load_model_button.set_filename(os.path.basename(filename))
@@ -404,10 +429,10 @@ class YoloV5InteractiveViewer:
         mask = cv2.imread(filename, cv2.IMREAD_GRAYSCALE)
         if mask is None:
             traceback.print_exc()
-            messagebox.showerror(message=f"Failed to load the mask")
+            messagebox.showerror(message="Failed to load the mask")
             return
 
-        self.mask = mask
+        self.mask = logic.Mask(mask)
         self.load_mask_button.set_filename(os.path.basename(filename))
         self.enable_mask.set(True)
 
@@ -438,9 +463,8 @@ class YoloV5InteractiveViewer:
 
         # populate file list
         tk_imagelist = tkinter.StringVar(value=image_names)  # type: ignore (mismatch between value and image_names)
-        if self.file_list is not None:
-            self.file_list["listvariable"] = tk_imagelist
-            self.set_image_index(0)
+        self.file_list["listvariable"] = tk_imagelist
+        self.set_image_index(0)
 
     def get_realpath(self):
         if self.image_index >= len(self.realpathes):
@@ -472,6 +496,10 @@ class YoloV5InteractiveViewer:
         self.render_result()
 
     def render_result(self):
+        if self.cv2_image is None:
+            # image is not loaded yet
+            return
+
         # check detect is done
         if self.values is None:
             return
@@ -483,7 +511,7 @@ class YoloV5InteractiveViewer:
                 messagebox.showerror(message="Mask is not loaded")
                 return
 
-            mask_dim = self.mask.shape[0:2]
+            mask_dim = self.mask.img.shape[0:2]
             image_dim = self.cv2_image.shape[0:2]
             if mask_dim != image_dim:
                 messagebox.showerror(

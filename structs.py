@@ -24,15 +24,14 @@ class AppConfig(BaseModel, extra=Extra.ignore):
     augment: bool
     bb_color: RgbTuple
     bb_width: int
+    show_outsiders: bool
     outsider_color: RgbTuple
     outsider_width: int
-    bounds_color: RgbTuple
-    bounds_width: int
     mask_thres: float
+    show_mask_border: bool
+    mask_border_color: RgbTuple
+    mask_border_width: int
     show_confidence: bool
-    hide_outsiders: bool
-    # Set the default, for compatibility
-    augment = False
 
 
 OptionalPath = typing.Optional[str]

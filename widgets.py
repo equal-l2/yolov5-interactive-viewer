@@ -1,76 +1,50 @@
 from PIL import ImageColor
 from tkinter import ttk, colorchooser
 import tkinter
-import traceback
 import typing
 
 from structs import RgbTuple, LineParam
 
+TkCommand = typing.Optional[typing.Callable[[], None]]
+
 
 class LineConfig(ttk.Frame):
-    def __init__(self, root: tkinter.Misc, color: str, width: int):
+    def __init__(
+        self, root: tkinter.Misc, color: str, width: int, command: TkCommand = None
+    ):
         ttk.Frame.__init__(self, root)
 
-        self.width_entry = IntEntry(self, label="Line width", init=width)
-        self.width_entry.pack()
+        self.width_scale = LineWidthScale(
+            self, label="Line Width", init=width, command=command
+        )
+        self.width_scale.pack()
 
-        self.colorpicker = ColorPicker(self, text="Line color", color=color)
+        self.colorpicker = ColorPicker(
+            self, text="Line color", color=color, command=command
+        )
         self.colorpicker.pack()
 
     def get(self):
-        width = self.width_entry.get()
-        if width is None:
-            return None
-        else:
-            return LineParam(self.colorpicker.get(), width)
+        return LineParam(self.colorpicker.get(), self.width_scale.get())
 
     def set(self, color: str, width: int):
         self.colorpicker.set(color)
-        self.width_entry.set(width)
-
-
-class IntEntry(ttk.Frame):
-    def __init__(self, root: tkinter.Misc, label: str, init: int):
-        ttk.Frame.__init__(self, root)
-
-        self.value = tkinter.StringVar(value=str(init))
-        ttk.Label(self, text=label).pack(side=tkinter.LEFT)
-        ttk.Entry(
-            self,
-            textvariable=self.value,
-        ).pack(side=tkinter.LEFT)
-
-    def strip(self):
-        s = self.value.get()
-        self.value.set(s.strip())
-
-    def get(self):
-        self.strip()
-        s = self.value.get()
-
-        if not s.isdigit():
-            return None
-
-        try:
-            val = int(s)
-            if str(val) == s and val > 0:
-                return val
-            else:
-                return None
-        except:
-            traceback.print_exc()
-            return None
-
-    def set(self, val: int):
-        self.value.set(str(val))
+        self.width_scale.set(width)
 
 
 class ColorPicker(ttk.Frame):
-    def __init__(self, root: tkinter.Misc, text: str, color: str):
+    color_label: tkinter.Label
+    color: str
+    command: TkCommand
+
+    def __init__(
+        self, root: tkinter.Misc, text: str, color: str, command: TkCommand = None
+    ):
+        self.command = command
         ttk.Frame.__init__(self, root)
 
         ttk.Label(self, text=text).pack(side=tkinter.LEFT)
-        ttk.Button(self, text="Choose...", command=self.choose_line_color).pack(
+        ttk.Button(self, text="Choose...", command=self.handle_command).pack(
             side=tkinter.LEFT
         )
         self.color_label = tkinter.Label(self, text="     ")
@@ -82,6 +56,11 @@ class ColorPicker(ttk.Frame):
         colors = colorchooser.askcolor()
         if colors is not None and colors[1] is not None:
             self._set_color(colors[1])
+
+    def handle_command(self):
+        self.choose_line_color()
+        if self.command is not None:
+            self.command()
 
     def _set_color(self, color: str):
         self.color = color
@@ -96,7 +75,12 @@ class ColorPicker(ttk.Frame):
 
 
 class ZeroToOneScale(tkinter.Scale):
-    def __init__(self, root: tkinter.Misc, label: str, init: float):
+    command: TkCommand
+
+    def __init__(
+        self, root: tkinter.Misc, label: str, init: float, command: TkCommand = None
+    ):
+        self.command = command
         tkinter.Scale.__init__(
             self,
             root,
@@ -105,13 +89,48 @@ class ZeroToOneScale(tkinter.Scale):
             resolution=0.01,
             label=label,
             orient=tkinter.HORIZONTAL,
+            command=self._run_command,
         )
         self.set(init)
+
+    def _run_command(self, _: str):
+        if self.command is not None:
+            self.command()
+
+
+class LineWidthScale(tkinter.Scale):
+    command: TkCommand
+
+    def __init__(
+        self, root: tkinter.Misc, label: str, init: int, command: TkCommand = None
+    ):
+        from consts import LINE_WIDTH_MIN, LINE_WIDTH_MAX
+
+        self.command = command
+
+        tkinter.Scale.__init__(
+            self,
+            root,
+            from_=LINE_WIDTH_MIN,
+            to=LINE_WIDTH_MAX,
+            resolution=1,
+            label=label,
+            orient=tkinter.HORIZONTAL,
+            command=self._run_command,
+        )
+        self.set(init)
+
+    def get(self) -> int:
+        return int(super().get())
+
+    def _run_command(self, _: str):
+        if self.command is not None:
+            self.command()
 
 
 class LoadFileButton(ttk.Frame):
     def __init__(
-        self, root: tkinter.Misc, text: str, command: typing.Callable[[], typing.Any]
+        self, root: tkinter.Misc, text: str, command: typing.Callable[[], None]
     ):
         ttk.Frame.__init__(self, root)
         ttk.Button(self, text=text, command=command).pack(side=tkinter.LEFT)

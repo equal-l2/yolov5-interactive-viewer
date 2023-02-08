@@ -14,6 +14,13 @@ BOUNDS_COLOR_DEFAULT: str = "#00FF00"  # green
 BBOXES_COLOR_DEFAULT: str = "#FF0000"  # red
 OUTSIDER_COLOR_DEFAULT: str = "#9900FF"  # purple
 
+BOUNDS_WIDTH_DEFAULT: int = 1
+BBOXES_WIDTH_DEFAULT: int = 2
+OUTSIDER_WIDTH_DEFAULT: int = 2
+
+LINE_WIDTH_MIN = 0
+LINE_WIDTH_MAX = 10
+
 # TODO: make configurable
 TEXT_COLOR: RgbTuple = (255, 0, 0)  # red
 
