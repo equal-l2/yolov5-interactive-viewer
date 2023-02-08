@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 
 from PIL import Image, ImageTk
 from tkinter import ttk, filedialog, messagebox
@@ -60,10 +61,9 @@ class ModelParamControl(ttk.Frame):
             self.command()
 
 
-class YoloV5InteractiveViewer:
+class YoloV5InteractiveViewer(ttk.Frame):
     # internal states
     model: Optional[consts.MODEL_TYPE] = None
-    realpathes: list[str] = []
     image_index: int = 0
     mask: Optional[logic.Mask] = None
     cv2_image: Optional[logic.Cv2Image]
@@ -71,9 +71,9 @@ class YoloV5InteractiveViewer:
     values: logic.DetectValues
 
     # tk objects
+    left_sidebar: LeftSidebar
     image_view: tkinter.Canvas
     tk_image: Optional[ImageTk.PhotoImage] = None
-    file_list: tkinter.Listbox
     load_model_button: LoadFileButton
     model_param_control: ModelParamControl
     load_mask_button: LoadFileButton
@@ -90,27 +90,25 @@ class YoloV5InteractiveViewer:
     show_filename: tkinter.BooleanVar
 
     def __init__(self, root: tkinter.Misc, init_config: Optional[ViewerInitConfig]):
-        mainframe = ttk.Frame(root)
-        mainframe.grid(column=0, row=0, sticky=tkinter.NSEW)
+        ttk.Frame.__init__(self, root)
 
         # place widgets
-        left_sidebar = ttk.Frame(mainframe)
-        left_sidebar.grid(column=0, row=0, sticky=tkinter.NS + tkinter.W)
-        left_sidebar["borderwidth"] = 1
+        self.left_sidebar = LeftSidebar(self)
+        self.left_sidebar.grid(column=0, row=0, sticky=tkinter.NS + tkinter.W)
+        self.left_sidebar["borderwidth"] = 1
 
-        self.image_view = tkinter.Canvas(mainframe)
+        self.image_view = tkinter.Canvas(self)
         self.image_view.grid(column=1, row=0, sticky=tkinter.NSEW)
         self.image_view.configure(bg="gray")
 
-        right_sidebar = ttk.Frame(mainframe)
+        right_sidebar = ttk.Frame(self)
         right_sidebar.grid(column=2, row=0, sticky=tkinter.NS + tkinter.E)
         right_sidebar["borderwidth"] = 1
 
         # configureしないと伸びない
-        mainframe.columnconfigure(1, weight=10)
-        mainframe.rowconfigure(0, weight=1)
+        self.columnconfigure(1, weight=10)
+        self.rowconfigure(0, weight=1)
 
-        self.configure_left_sidebar(left_sidebar)
         self.configure_right_sidebar(right_sidebar)
 
         if init_config is not None:
@@ -124,61 +122,25 @@ class YoloV5InteractiveViewer:
         if init_config.config_path is not None:
             self.import_config(init_config.config_path)
 
-    def _update_image_index(self, new_index: int):
+    def update_image_index(self, new_index: int):
         self.image_index = new_index
         self.run_detect()
 
-    def set_image_index(self, new_index: int):
-        file_list = self.file_list
-        if 0 <= new_index and new_index < file_list.size():
-            file_list.see(new_index)
-            file_list.selection_clear(0, tkinter.END)
-            file_list.selection_set(new_index)
-            self._update_image_index(new_index)
-
-    def configure_left_sidebar(self, parent: tkinter.Misc):
-        # load folder button
-        ttk.Button(parent, text="Load folder", command=self.load_folder).pack()
-
-        # file list
-        def on_list_selected(e: typing.Any):
-            select = e.widget.curselection()
-            if len(select) < 1:
-                return
-            self._update_image_index(select[0])
-
-        self.file_list = tkinter.Listbox(parent, height=10)
-        self.file_list.pack()
-        self.file_list.bind("<<ListboxSelect>>", on_list_selected)
-
-        # next/prev button
-        def modify_index(delta: int):
-            select = self.file_list.curselection()
-            if len(select) < 1:
-                return
-            current_idx: int = select[0]
-            next_idx = current_idx + delta
-            self.set_image_index(next_idx)
-
-        nav_frame = ttk.Frame(parent)
-        ttk.Button(nav_frame, text="<-", command=lambda: modify_index(-1)).grid(
-            row=0, column=0
-        )
-        ttk.Button(nav_frame, text="->", command=lambda: modify_index(1)).grid(
-            row=0, column=2
-        )
-        nav_frame.pack()
-
-        ttk.Separator(parent, orient=tkinter.HORIZONTAL).pack()
-
-        # save picture button
-        ttk.Button(parent, text="Save picture", command=self.save_image).pack()
+    def clear_image(self):
+        self.pil_image = None
+        self.cv2_image = None
+        self.tk_image = None
+        self.image_view.delete("all")
 
     def save_image(self):
-        if self.image_index >= len(self.realpathes) or self.pil_image is None:
+        if self.pil_image is None:
             return
 
-        original_basename = os.path.basename(self.realpathes[self.image_index])
+        original_path = self.get_realpath()
+        if original_path is None:
+            return
+
+        original_basename = os.path.basename(original_path)
         original_name, ext = os.path.splitext(original_basename)
         new_name = original_name + "_detected" + ext
 
@@ -386,6 +348,9 @@ class YoloV5InteractiveViewer:
 
     def fit_image(self):
         """scale the shown image to fit to the window"""
+        # clear image view
+        self.image_view.delete("all")
+
         if self.pil_image is not None:
             width = self.image_view.winfo_width()
             height = self.image_view.winfo_height()
@@ -436,42 +401,8 @@ class YoloV5InteractiveViewer:
         self.load_mask_button.set_filename(os.path.basename(filename))
         self.enable_mask.set(True)
 
-    def load_folder(self):
-        if self.model is None:
-            messagebox.showerror(message="You need to load a model first")
-            return
-
-        folder = filedialog.askdirectory(title="Choose Image Folder")
-        if folder == "":
-            # canceled
-            return
-
-        # get all images in the folder
-        images: list[tuple[str, str]] = []
-        for f in os.listdir(folder):
-            ext = os.path.splitext(f)[1]
-            valid_image_ext = [".jpg", ".jpeg", ".png"]
-            if ext.lower() in valid_image_ext:
-                realpath = os.path.join(folder, f)
-                images.append((f, realpath))
-
-        # sort files by name
-        images.sort(key=lambda y: y[0])
-
-        image_names = [name for (name, _) in images]
-        self.realpathes = [realpath for (_, realpath) in images]
-
-        # populate file list
-        tk_imagelist = tkinter.StringVar(value=image_names)  # type: ignore (mismatch between value and image_names)
-        self.file_list["listvariable"] = tk_imagelist
-        self.set_image_index(0)
-
-    def get_realpath(self):
-        if self.image_index >= len(self.realpathes):
-            # logic error (not because of users)
-            # usually occurs when no image is loaded
-            return None
-        return self.realpathes[self.image_index]
+    def get_realpath(self) -> Optional[str]:
+        return self.left_sidebar.get_realpath(self.image_index)
 
     def run_detect(self):
         if self.model is None:
@@ -547,25 +478,139 @@ class YoloV5InteractiveViewer:
         self.fit_image()
 
 
-print("Initializing...")
-root = tkinter.Tk()
-root.geometry("1600x1000")
-root.title("YOLOv5 Interactive Viewer")
-# configureしないと伸びない
-root.columnconfigure(0, weight=1)
-root.rowconfigure(0, weight=1)
+class LeftSidebar(ttk.Frame):
+    class RootProxy:
+        root: YoloV5InteractiveViewer
 
-init_config = None
-if os.path.isfile("init.json"):
-    try:
-        with open("init.json", "r") as f:
-            config_json = json.load(f)
-        init_config = ViewerInitConfig.parse_obj(config_json)
-    except:
-        traceback.print_exc()
-        messagebox.showerror(message=f"Failed to load init config")
+        def __init__(self, root: YoloV5InteractiveViewer):
+            self.root = root
+
+        def update_image_index(self, index: int):
+            self.root.update_image_index(index)
+
+        def has_model(self) -> bool:
+            return self.root.model is not None
+
+        def clear_image(self):
+            self.root.clear_image()
+
+    proxy: RootProxy
+    file_list: tkinter.Listbox
+    realpathes: list[str] = []
+
+    def __init__(self, root: YoloV5InteractiveViewer):
+        ttk.Frame.__init__(self, root)
+        self.proxy = self.RootProxy(root)
+
+        # load folder button
+        ttk.Button(self, text="Load folder", command=self.load_folder).pack()
+
+        # file list
+        def on_list_selected(e: typing.Any):
+            select = e.widget.curselection()
+            if len(select) < 1:
+                return
+            self.proxy.update_image_index(select[0])
+
+        self.file_list = tkinter.Listbox(self, height=10)
+        self.file_list.pack()
+        self.file_list.bind("<<ListboxSelect>>", on_list_selected)
+
+        # next/prev button
+        def modify_index(delta: int):
+            select = self.file_list.curselection()
+            if len(select) < 1:
+                return
+            current_idx: int = select[0]
+            next_idx = current_idx + delta
+            self.set_image_index(next_idx)
+
+        nav_frame = ttk.Frame(self)
+        ttk.Button(nav_frame, text="<-", command=lambda: modify_index(-1)).grid(
+            row=0, column=0
+        )
+        ttk.Button(nav_frame, text="->", command=lambda: modify_index(1)).grid(
+            row=0, column=2
+        )
+        nav_frame.pack()
+
+        ttk.Separator(self, orient=tkinter.HORIZONTAL).pack()
+
+        # save picture button
+        ttk.Button(self, text="Save picture", command=root.save_image).pack()
+
+    def set_image_index(self, new_index: int):
+        file_list = self.file_list
+        if 0 <= new_index and new_index < file_list.size():
+            file_list.see(new_index)
+            file_list.selection_clear(0, tkinter.END)
+            file_list.selection_set(new_index)
+            self.proxy.update_image_index(new_index)
+
+    def load_folder(self):
+        if not self.proxy.has_model():
+            messagebox.showerror(message="You need to load a model first")
+            return
+
+        folder = filedialog.askdirectory(title="Choose Image Folder")
+        if folder == "":
+            # canceled
+            return
+
+        self.proxy.clear_image()
+        # get all images in the folder
+        images: list[tuple[str, str]] = []
+        for f in os.listdir(folder):
+            ext = os.path.splitext(f)[1]
+            valid_image_ext = [".jpg", ".jpeg", ".png"]
+            if ext.lower() in valid_image_ext:
+                realpath = os.path.join(folder, f)
+                images.append((f, realpath))
+
+        # sort files by name
+        images.sort(key=lambda y: y[0])
+
+        image_names = [name for (name, _) in images]
+        self.realpathes = [realpath for (_, realpath) in images]
+
+        # populate file list
+        tk_imagelist = tkinter.StringVar(value=image_names)  # type: ignore (mismatch between value and image_names)
+        self.file_list["listvariable"] = tk_imagelist
+        self.set_image_index(0)
+
+    def get_realpath(self, index: int) -> Optional[str]:
+        if index >= len(self.realpathes):
+            # logic error (not because of users)
+            # usually occurs when no image is loaded
+            return None
+        return self.realpathes[index]
 
 
-view = YoloV5InteractiveViewer(root, init_config)
-print("Initialized")
-root.mainloop()
+class RightSidebar(ttk.Frame):
+    def __init__(self, root: YoloV5InteractiveViewer):
+        ttk.Frame.__init__(self, root)
+
+
+if __name__ == "__main__":
+    print("Initializing...")
+    root = tkinter.Tk()
+    root.geometry("1600x1000")
+    root.title("YOLOv5 Interactive Viewer")
+    # configureしないと伸びない
+    root.columnconfigure(0, weight=1)
+    root.rowconfigure(0, weight=1)
+
+    init_config = None
+    if os.path.isfile("init.json"):
+        try:
+            with open("init.json", "r") as f:
+                config_json = json.load(f)
+            init_config = ViewerInitConfig.parse_obj(config_json)
+        except:
+            traceback.print_exc()
+            messagebox.showerror(message=f"Failed to load init config")
+
+    view = YoloV5InteractiveViewer(root, init_config)
+    view.grid(column=0, row=0, sticky=tkinter.NSEW)
+    print("Initialized")
+    root.mainloop()
