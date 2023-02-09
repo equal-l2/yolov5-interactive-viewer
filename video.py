@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import argparse
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -38,6 +40,7 @@ def run(
     mask_path: str | None,
 ) -> int:
     import json
+    import platform
 
     import logic
     from consts import TEXT_COLOR
@@ -62,8 +65,14 @@ def run(
             return -1
         mask = logic.Mask(mask_img)
 
-    # For other OSes than macOS, cv2.CAP_FFMPEG can be used
-    cv2_api_preference = cv2.CAP_AVFOUNDATION
+    if platform.system() == "Darwin":
+        print("[I] macOS detected, using AVFoundation for video I/O")
+        cv2_api_preference = cv2.CAP_AVFOUNDATION
+    else:
+        print("[I] macOS NOT detected, using auto-detected backend for video I/O")
+        # There may be a better cap with hardware acceleration, but I don't know about the other platforms...
+        cv2_api_preference = cv2.CAP_ANY
+
 
     print(f'[I] Open source "{src_path}"')
     reader = cv2.VideoCapture(src_path, apiPreference=cv2_api_preference)
@@ -122,6 +131,9 @@ def run(
         writer.write(frame)
 
         t.update()
+
+    # set the progress bar to 100%
+    t.update(frame_count - t.n)
 
     t.close()
     return 0

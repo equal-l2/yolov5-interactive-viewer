@@ -1,11 +1,13 @@
-from typing import TYPE_CHECKING
+from __future__ import annotations
 
-from structs import RgbTuple
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from typing import TypeAlias
 
     from yolov5.models.common import AutoShape
+
+    from structs import RgbTuple
 
     # the model type may change, as it is an internal type taken from the current implementation of yolov5
     MODEL_TYPE: TypeAlias = AutoShape

@@ -1,13 +1,16 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeAlias
 
 from pydantic import BaseModel, Extra
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from typing import TypeAlias
 
-    RgbTuple: TypeAlias = tuple[int, int, int]
+# required runtime for pydantic
+RgbTuple: TypeAlias = tuple[int, int, int]
+OptionalPath: TypeAlias = str | None
 
 
 class LineParam:
@@ -36,9 +39,6 @@ class AppConfig(BaseModel, extra=Extra.ignore):
     mask_border_color: RgbTuple
     mask_border_width: int
     show_confidence: bool
-
-
-OptionalPath = str | None
 
 
 class ViewerInitConfig(BaseModel, extra=Extra.ignore):

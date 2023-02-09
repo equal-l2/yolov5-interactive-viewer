@@ -1,13 +1,16 @@
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, Any, Final
 
 import cv2
 import numpy
 
-from consts import IMG_SIZE, MODEL_TYPE
+from consts import IMG_SIZE
 
 if TYPE_CHECKING:
     from typing import TypeAlias
 
+    from consts import MODEL_TYPE
     from structs import AppConfig, RgbTuple
 
     Cv2Image: TypeAlias = cv2.Mat
