@@ -1,20 +1,25 @@
-import typing
-from typing import Optional, TypeAlias, Final
+from typing import TYPE_CHECKING, Any, Final
+
 import cv2
 import numpy
 
-from structs import RgbTuple, AppConfig
-from consts import MODEL_TYPE
+from consts import IMG_SIZE, MODEL_TYPE
 
-Cv2Image: TypeAlias = cv2.Mat
-DetectValues: TypeAlias = typing.Any
+if TYPE_CHECKING:
+    from typing import TypeAlias
+
+    from structs import AppConfig, RgbTuple
+
+    Cv2Image: TypeAlias = cv2.Mat
+    DetectValues: TypeAlias = Any
+    BBoxXyxy: TypeAlias = tuple[tuple[int, int], tuple[int, int]]
 
 
 class Mask:
     img: Final[Cv2Image]
-    contours: Final[typing.Any]
+    contours: Final[Any]
 
-    def __init__(self, img_input: Cv2Image):
+    def __init__(self, img_input: Cv2Image) -> None:
         """
         input: must be a grayscale image
         """
@@ -31,12 +36,13 @@ class Mask:
 
 
 def run_detect(
-    model: MODEL_TYPE, cv2_image: Cv2Image, config: AppConfig
+    model: MODEL_TYPE,
+    cv2_image: Cv2Image,
+    config: AppConfig,
 ) -> DetectValues:
     """Run detection on `cv2_image` using the model from `model`."""
     model.conf = config.confidence
     model.iou = config.iou
-    IMG_SIZE = 1280  # TODO: make configurable?
     detected = model(cv2_image, size=IMG_SIZE, augment=config.augment)
 
     values = detected.pandas().xyxy[0]
@@ -47,9 +53,6 @@ def run_detect(
     values = values.astype({"xmin": int, "ymin": int, "xmax": int, "ymax": int})
 
     return values
-
-
-BBoxXyxy: typing.TypeAlias = tuple[tuple[int, int], tuple[int, int]]
 
 
 def compute_intersect(box1: BBoxXyxy, box2: BBoxXyxy) -> int:
@@ -68,11 +71,11 @@ def compute_intersect(box1: BBoxXyxy, box2: BBoxXyxy) -> int:
 def draw_result(
     values: DetectValues,
     cv2_image: Cv2Image,
-    filename: Optional[str],
-    mask: Optional[Mask],
+    filename: str | None,
+    mask: Mask | None,
     text_color: RgbTuple,
     config: AppConfig,
-):
+) -> None:
     """Read detection results from `values` and draw them to `cv2_image` (destructive)
     filename: if not None, the filename will be rendered on the image
     mask: if not None, mask will be considered for bounding box elimination
@@ -139,6 +142,6 @@ def draw_result(
                 )
 
 
-def rgb2hex(rgb: RgbTuple):
+def rgb2hex(rgb: RgbTuple) -> str:
     (r, g, b) = rgb
     return f"#{r:02X}{g:02X}{b:02X}"

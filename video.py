@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 import argparse
-from structs import AppConfig, RgbTuple
-from consts import MODEL_TYPE
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from structs import AppConfig
+
+if TYPE_CHECKING:
+    from consts import MODEL_TYPE
+    from structs import RgbTuple
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--src", required=True)
@@ -17,7 +23,7 @@ def to_bgr(rgb: RgbTuple) -> tuple[int, int, int]:
 
 
 # Convert all colors in config from RGB to BGR, for cv2
-def config_to_bgr(config: AppConfig):
+def config_to_bgr(config: AppConfig) -> AppConfig:
     config.bb_color = to_bgr(config.bb_color)
     config.outsider_color = to_bgr(config.outsider_color)
     config.mask_border_color = to_bgr(config.mask_border_color)
@@ -25,21 +31,24 @@ def config_to_bgr(config: AppConfig):
 
 
 def run(
-    src_path: str, dst_path: str, config_path: str, model_path: str, mask_path: str
-):
-    from os.path import exists
+    src_path: str,
+    dst_path: str,
+    config_path: str,
+    model_path: str,
+    mask_path: str | None,
+) -> int:
     import json
 
     import logic
     from consts import TEXT_COLOR
 
     print(f'[I] Load config from "{config_path}"')
-    with open(config_path, "r") as f:
+    with Path(config_path).open() as f:
         config_json = json.load(f)
     config = config_to_bgr(AppConfig.parse_obj(config_json))
 
     # sorry to be here, but for performance...
-    print(f"[I] Check mask")
+    print("[I] Check mask")
     import cv2
 
     if mask_path is None:
@@ -54,13 +63,13 @@ def run(
         mask = logic.Mask(mask_img)
 
     # For other OSes than macOS, cv2.CAP_FFMPEG can be used
-    CV2_API_PREFERENCE = cv2.CAP_AVFOUNDATION
+    cv2_api_preference = cv2.CAP_AVFOUNDATION
 
     print(f'[I] Open source "{src_path}"')
-    reader = cv2.VideoCapture(src_path, apiPreference=CV2_API_PREFERENCE)
+    reader = cv2.VideoCapture(src_path, apiPreference=cv2_api_preference)
 
     if not reader.isOpened():
-        print(f"[F] Failed to open source")
+        print("[F] Failed to open source")
         return -1
 
     width = int(reader.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -69,18 +78,18 @@ def run(
     frame_count = int(reader.get(cv2.CAP_PROP_FRAME_COUNT))
 
     print(f'[I] Open destination "{dst_path}"')
-    if exists(dst_path):
-        print(f"[F] Output already exists, cannot save")
+    if Path(dst_path).exists():
+        print("[F] Output already exists, cannot save")
         return -1
     writer = cv2.VideoWriter(
         filename=dst_path,
-        apiPreference=CV2_API_PREFERENCE,
+        apiPreference=cv2_api_preference,
         fourcc=cv2.VideoWriter_fourcc(*"avc1"),
         fps=fps,
         frameSize=(width, height),
     )
     if not writer.isOpened():
-        print(f"[F] Failed to open destination")
+        print("[F] Failed to open destination")
         return -1
 
     # sorry to be here, but for performance...

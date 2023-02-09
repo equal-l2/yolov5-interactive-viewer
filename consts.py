@@ -1,11 +1,21 @@
-from structs import RgbTuple
-from yolov5.models.common import AutoShape
+from typing import TYPE_CHECKING
 
-# YOLOv5 parameters, from the default value in detect.py
+from structs import RgbTuple
+
+if TYPE_CHECKING:
+    from typing import TypeAlias
+
+    from yolov5.models.common import AutoShape
+
+    # the model type may change, as it is an internal type taken from the current implementation of yolov5
+    MODEL_TYPE: TypeAlias = AutoShape
+
+# YOLOv5 parameters, from the default value in yolov5/detect.py
 CONFIDENCE_DEFAULT: float = 0.25
 IOU_DEFAULT: float = 0.45
+IMG_SIZE = 1280  # better to match with the dataset that used for model training
 
-# our parameters
+# rendering parameters
 MASK_THRES_DEFAULT: float = 0.6
 UPPER_BOUND_DEFAULT: int = 287
 LOWER_BOUND_DEFAULT: int = 850
@@ -18,11 +28,8 @@ BOUNDS_WIDTH_DEFAULT: int = 1
 BBOXES_WIDTH_DEFAULT: int = 2
 OUTSIDER_WIDTH_DEFAULT: int = 2
 
-LINE_WIDTH_MIN = 0
+LINE_WIDTH_MIN = 1
 LINE_WIDTH_MAX = 10
 
 # TODO: make configurable
 TEXT_COLOR: RgbTuple = (255, 0, 0)  # red
-
-# the type of model may change, as it is taken from internal implementation
-MODEL_TYPE = AutoShape

@@ -1,20 +1,24 @@
-import typing
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Extra
 
-RgbTuple: typing.TypeAlias = tuple[int, int, int]
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from typing import TypeAlias
+
+    RgbTuple: TypeAlias = tuple[int, int, int]
 
 
 class LineParam:
     color: RgbTuple
     width: int
 
-    def __init__(self, color: RgbTuple, width: int):
+    def __init__(self, color: RgbTuple, width: int) -> None:
         self.color = color
         self.width = width
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[RgbTuple | int]:
         return iter((self.color, self.width))
 
 
@@ -34,7 +38,7 @@ class AppConfig(BaseModel, extra=Extra.ignore):
     show_confidence: bool
 
 
-OptionalPath = typing.Optional[str]
+OptionalPath = str | None
 
 
 class ViewerInitConfig(BaseModel, extra=Extra.ignore):
