@@ -6,6 +6,7 @@ import os
 import tkinter
 import traceback
 import typing
+from dataclasses import dataclass
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -15,56 +16,7 @@ from PIL import Image, ImageTk
 import consts
 import logic
 from structs import AppConfig, ModelParam, ViewerInitConfig
-from widgets import LineConfig, LoadFileButton, TkCommand, ZeroToOneScale
-
-
-class ModelParamControl(ttk.Frame):
-    confidence: ZeroToOneScale
-    iou: ZeroToOneScale
-    augment: tkinter.BooleanVar
-
-    command: TkCommand
-
-    def __init__(self, root: tkinter.Misc, *, command: TkCommand = None) -> None:
-        ttk.Frame.__init__(self, root)
-
-        self.command = command
-
-        self.confidence = ZeroToOneScale(
-            self,
-            label="Confidence",
-            init=consts.CONFIDENCE_DEFAULT,
-            command=command,
-        )
-        self.confidence.pack()
-
-        self.iou = ZeroToOneScale(
-            self,
-            label="IoU",
-            init=consts.IOU_DEFAULT,
-            command=command,
-        )
-        self.iou.pack()
-
-        self.augment = tkinter.BooleanVar(value=False)
-        ttk.Checkbutton(
-            self,
-            text="Enable augmentation on inference",
-            variable=self.augment,
-            command=self._button_command,
-        ).pack()
-
-    def get(self) -> ModelParam:
-        return ModelParam(self.confidence.get(), self.iou.get(), self.augment.get())
-
-    def set(self, confidence: float, iou: float, augment: bool) -> None:
-        self.confidence.set(confidence)
-        self.iou.set(iou)
-        self.augment.set(augment)
-
-    def _button_command(self) -> None:
-        if self.command is not None:
-            self.command()
+from widgets import LineConfig, LineParam, LoadFileButton, TkCommand, ZeroToOneScale
 
 
 class YoloV5InteractiveViewer(ttk.Frame):
@@ -90,7 +42,7 @@ class YoloV5InteractiveViewer(ttk.Frame):
         ttk.Frame.__init__(self, root)
 
         # place widgets
-        self.left_sidebar = LeftSidebar(self)
+        self.left_sidebar = LeftSidebar(self, self)
         self.left_sidebar.grid(column=0, row=0, sticky=tkinter.NS + tkinter.W)
         self.left_sidebar["borderwidth"] = 1
 
@@ -98,7 +50,7 @@ class YoloV5InteractiveViewer(ttk.Frame):
         self.image_view.grid(column=1, row=0, sticky=tkinter.NSEW)
         self.image_view.configure(bg="gray")
 
-        self.right_sidebar = RightSidebar(self)
+        self.right_sidebar = RightSidebar(self, self)
         self.right_sidebar.grid(column=2, row=0, sticky=tkinter.NS + tkinter.E)
         self.right_sidebar["borderwidth"] = 1
 
@@ -200,7 +152,7 @@ class YoloV5InteractiveViewer(ttk.Frame):
             messagebox.showerror(message="Failed to load the model")
             return
 
-        self.right_sidebar.load_model_button.set_filename(Path(filename).name)
+        self.right_sidebar.set_model_filename(Path(filename).name)
 
     def load_mask(self, filename: str) -> None:
         print(f"Load mask {filename}")
@@ -211,8 +163,8 @@ class YoloV5InteractiveViewer(ttk.Frame):
             return
 
         self.mask = logic.Mask(mask)
-        self.right_sidebar.load_mask_button.set_filename(Path(filename).name)
-        self.right_sidebar.enable_mask.set(True)
+        self.right_sidebar.set_mask_filename(Path(filename).name)
+        self.right_sidebar.turn_mask_on()
 
     def get_realpath(self) -> str | None:
         return self.left_sidebar.get_realpath(self.image_index)
@@ -253,7 +205,7 @@ class YoloV5InteractiveViewer(ttk.Frame):
             return
 
         # check mask
-        enable_mask = self.right_sidebar.enable_mask.get()
+        enable_mask = self.right_sidebar.is_mask_on()
         if enable_mask:
             if self.mask is None:
                 messagebox.showerror(message="Mask is not loaded")
@@ -269,7 +221,7 @@ class YoloV5InteractiveViewer(ttk.Frame):
 
         # set filename
         filename = None
-        if self.right_sidebar.show_filename.get():
+        if self.right_sidebar.is_filename_shown():
             realpath = self.get_realpath()
             if realpath is None:
                 filename = "ERROR: NO NAME"
@@ -296,28 +248,32 @@ class YoloV5InteractiveViewer(ttk.Frame):
 
 
 class LeftSidebar(ttk.Frame):
-    class RootProxy:
-        root: YoloV5InteractiveViewer
-
-        def __init__(self, root: YoloV5InteractiveViewer) -> None:
-            self.root = root
-
-        def update_image_index(self, index: int) -> None:
-            self.root.update_image_index(index)
-
-        def has_model(self) -> bool:
-            return self.root.model is not None
-
-        def clear_image(self) -> None:
-            self.root.clear_image()
-
-    proxy: RootProxy
     file_list: tkinter.Listbox
     realpathes: list[str] = []
 
-    def __init__(self, root: YoloV5InteractiveViewer) -> None:
+    proxy: Proxy
+
+    class Proxy:
+        control: YoloV5InteractiveViewer
+
+        def __init__(self, control: YoloV5InteractiveViewer) -> None:
+            self.control = control
+
+        def update_image_index(self, index: int) -> None:
+            self.control.update_image_index(index)
+
+        def has_model(self) -> bool:
+            return self.control.model is not None
+
+        def clear_image(self) -> None:
+            self.control.clear_image()
+
+        def save_image(self) -> None:
+            self.control.save_image()
+
+    def __init__(self, root: tkinter.Misc, control: YoloV5InteractiveViewer) -> None:
         ttk.Frame.__init__(self, root)
-        self.proxy = self.RootProxy(root)
+        self.proxy = self.Proxy(control)
 
         # load folder button
         ttk.Button(self, text="Load folder", command=self.load_folder).pack()
@@ -356,7 +312,7 @@ class LeftSidebar(ttk.Frame):
         ttk.Separator(self, orient=tkinter.HORIZONTAL).pack()
 
         # save picture button
-        ttk.Button(self, text="Save picture", command=root.save_image).pack()
+        ttk.Button(self, text="Save picture", command=self.proxy.save_image).pack()
 
     def set_image_index(self, new_index: int) -> None:
         file_list = self.file_list
@@ -408,155 +364,49 @@ class LeftSidebar(ttk.Frame):
 
 
 class RightSidebar(ttk.Frame):
-    class RootProxy:
-        root: YoloV5InteractiveViewer
+    _model_config: ModelConfig
+    _render_config: RenderConfig
 
-        def __init__(self, root: YoloV5InteractiveViewer) -> None:
-            self.root = root
+    proxy: Proxy
+
+    class Proxy:
+        control: YoloV5InteractiveViewer
+
+        def __init__(self, control: YoloV5InteractiveViewer) -> None:
+            self.control = control
 
         def run_detect(self) -> None:
-            self.root.run_detect()
+            self.control.run_detect()
 
         def render_result(self) -> None:
-            self.root.render_result()
+            self.control.render_result()
 
         def import_config(self, filename: str) -> None:
-            self.root.import_config(filename)
+            self.control.import_config(filename)
 
         def export_config(self, filename: str) -> None:
-            self.root.export_config(filename)
+            self.control.export_config(filename)
 
         def load_model(self, filename: str) -> None:
-            self.root.load_model(filename)
+            self.control.load_model(filename)
 
         def load_mask(self, filename: str) -> None:
-            self.root.load_model(filename)
+            self.control.load_model(filename)
 
-    proxy: RootProxy
-
-    load_model_button: LoadFileButton
-    model_param_control: ModelParamControl
-    load_mask_button: LoadFileButton
-    mask_border_config: LineConfig
-    mask_thres: ZeroToOneScale
-    bb_config: LineConfig
-    outsider_config: LineConfig
-
-    enable_mask: tkinter.BooleanVar
-    show_mask_border: tkinter.BooleanVar
-    show_outsiders: tkinter.BooleanVar
-    show_confidence: tkinter.BooleanVar
-    show_filename: tkinter.BooleanVar
-
-    def __init__(self, root: YoloV5InteractiveViewer) -> None:
+    def __init__(self, root: tkinter.Misc, control: YoloV5InteractiveViewer) -> None:
         ttk.Frame.__init__(self, root)
-        self.proxy = self.RootProxy(root)
+        self.proxy = self.Proxy(control)
 
         config_io = ttk.LabelFrame(self, text="Config")
         ttk.Button(config_io, text="Export config", command=self.export_config).pack()
         ttk.Button(config_io, text="Import config", command=self.import_config).pack()
         config_io.pack()
 
-        # model config
-        model_config = ttk.LabelFrame(self, text="Model")
-        model_config.pack()
+        self._model_config = ModelConfig(self, control)
+        self._model_config.pack()
 
-        self.load_model_button = LoadFileButton(
-            model_config,
-            "Load model",
-            command=self.load_model,
-        )
-        self.load_model_button.pack()
-
-        self.model_param_control = ModelParamControl(model_config)
-        self.model_param_control.pack()
-
-        # mask config
-        mask_config_frame = ttk.LabelFrame(self, text="Mask")
-
-        self.enable_mask = tkinter.BooleanVar(value=False)
-        ttk.Checkbutton(
-            mask_config_frame,
-            text="Apply mask as postprocess",
-            variable=self.enable_mask,
-        ).pack()
-
-        self.load_mask_button = LoadFileButton(
-            mask_config_frame,
-            "Load mask",
-            command=self.load_mask,
-        )
-        self.load_mask_button.pack()
-
-        self.show_mask_border = tkinter.BooleanVar(value=True)
-        ttk.Checkbutton(
-            mask_config_frame,
-            text="Show borders of the mask",
-            variable=self.show_mask_border,
-        ).pack()
-
-        self.mask_border_config = LineConfig(
-            mask_config_frame,
-            color=consts.BOUNDS_COLOR_DEFAULT,
-            width=consts.BOUNDS_WIDTH_DEFAULT,
-        )
-        self.mask_border_config.pack()
-
-        self.mask_thres = ZeroToOneScale(
-            mask_config_frame,
-            label="Threshold",
-            init=consts.MASK_THRES_DEFAULT,
-        )
-        self.mask_thres.pack()
-
-        mask_config_frame.pack()
-        # mask config END
-
-        # bb config BEGIN
-        bb_config_frame = ttk.LabelFrame(self, text="Bounding boxes")
-        self.bb_config = LineConfig(
-            bb_config_frame,
-            color=consts.BBOXES_COLOR_DEFAULT,
-            width=consts.BBOXES_WIDTH_DEFAULT,
-        )
-        self.bb_config.pack()
-        bb_config_frame.pack()
-        # bb config END
-
-        # mark outside of the mask
-        outsider_config_frame = ttk.LabelFrame(self, text="Outsiders")
-
-        self.show_outsiders = tkinter.BooleanVar(value=False)
-        ttk.Checkbutton(
-            outsider_config_frame,
-            text="Show outsiders",
-            variable=self.show_outsiders,
-        ).pack()
-
-        self.outsider_config = LineConfig(
-            outsider_config_frame,
-            color=consts.OUTSIDER_COLOR_DEFAULT,
-            width=consts.OUTSIDER_WIDTH_DEFAULT,
-        )
-        self.outsider_config.pack()
-        outsider_config_frame.pack()
-
-        misc_frame = ttk.LabelFrame(self, text="Misc")
-        misc_frame.pack()
-
-        self.show_confidence = tkinter.BooleanVar(value=False)
-        ttk.Checkbutton(
-            misc_frame,
-            text="Show confidence with bounding boxes",
-            variable=self.show_confidence,
-        ).pack()
-
-        self.show_filename = tkinter.BooleanVar(value=False)
-        ttk.Checkbutton(
-            misc_frame,
-            text="Show filename in the picture",
-            variable=self.show_filename,
-        ).pack()
+        self._render_config = RenderConfig(self, control)
+        self._render_config.pack()
 
         ttk.Button(self, text="Rerender", command=self.proxy.render_result).pack()
 
@@ -583,13 +433,330 @@ class RightSidebar(ttk.Frame):
 
         self.proxy.export_config(filename)
 
+    def get_config(self) -> AppConfig | None:
+        render_params = self._render_config.get_param()
+        model_param = self._model_config.get_param()
+
+        return AppConfig(
+            confidence=model_param.confidence,
+            iou=model_param.iou,
+            augment=model_param.augment,
+            bb_color=render_params.bb_params.color,
+            bb_width=render_params.bb_params.width,
+            show_outsiders=render_params.show_outsiders,
+            outsider_color=render_params.outsider_params.color,
+            outsider_width=render_params.outsider_params.width,
+            mask_thres=render_params.mask_thres,
+            show_mask_border=render_params.show_mask_border,
+            mask_border_color=render_params.mask_border_params.color,
+            mask_border_width=render_params.mask_border_params.width,
+            show_confidence=render_params.show_confidence,
+        )
+
+    def from_config(self, app_config: AppConfig) -> None:
+        self._model_config.from_param(
+            ModelParam(
+                confidence=app_config.confidence,
+                iou=app_config.iou,
+                augment=app_config.augment,
+            ),
+        )
+
+        render_params = RenderConfig.Param(
+            bb_params=LineParam(app_config.bb_color, app_config.bb_width),
+            outsider_params=LineParam(
+                app_config.outsider_color,
+                app_config.outsider_width,
+            ),
+            mask_border_params=LineParam(
+                app_config.mask_border_color,
+                app_config.mask_border_width,
+            ),
+            mask_thres=app_config.mask_thres,
+            show_mask_border=app_config.show_mask_border,
+            show_outsiders=app_config.show_outsiders,
+            show_confidence=app_config.show_confidence,
+        )
+        self._render_config.from_param(render_params)
+
+    def is_filename_shown(self) -> bool:
+        return self._render_config.is_filename_shown()
+
+    def is_mask_on(self) -> bool:
+        return self._render_config.is_mask_on()
+
+    def turn_mask_on(self) -> None:
+        self._render_config.turn_mask_on()
+
+    def set_model_filename(self, filename: str) -> None:
+        self._model_config.set_model_filename(filename)
+
+    def set_mask_filename(self, filename: str) -> None:
+        self._render_config.set_mask_filename(filename)
+
+
+class ModelConfig(ttk.Frame):
+    _load_model_button: LoadFileButton
+    _model_param_control: ModelParamControl
+
+    _proxy: Proxy
+
+    class Proxy:
+        control: YoloV5InteractiveViewer
+
+        def __init__(self, control: YoloV5InteractiveViewer) -> None:
+            self.control = control
+
+        def load_model(self, filename: str) -> None:
+            self.control.load_model(filename)
+
+    def __init__(self, root: tkinter.Misc, control: YoloV5InteractiveViewer) -> None:
+        ttk.Frame.__init__(self, root)
+        self._proxy = self.Proxy(control)
+
+        # model config
+        model_config = ttk.LabelFrame(self, text="Model")
+        model_config.pack()
+
+        self._load_model_button = LoadFileButton(
+            model_config,
+            "Load model",
+            command=self.load_model,
+        )
+        self._load_model_button.pack()
+
+        self._model_param_control = ModelParamControl(model_config)
+        self._model_param_control.pack()
+
     def load_model(self) -> None:
         filename = filedialog.askopenfilename(title="Choose Model")
         if filename == "":
             # canceled
             return
 
-        self.proxy.load_model(filename)
+        self._proxy.load_model(filename)
+
+    def get_param(self) -> ModelParam:
+        return self._model_param_control.get()
+
+    def from_param(self, param: ModelParam) -> None:
+        self._model_param_control.from_param(param)
+
+    def set_model_filename(self, filename: str) -> None:
+        self._load_model_button.set_filename(filename)
+
+
+class ModelParamControl(ttk.Frame):
+    _confidence: ZeroToOneScale
+    _iou: ZeroToOneScale
+    _augment: tkinter.BooleanVar
+
+    _command: TkCommand
+
+    def __init__(self, root: tkinter.Misc, *, command: TkCommand = None) -> None:
+        ttk.Frame.__init__(self, root)
+
+        self._command = command
+
+        self._confidence = ZeroToOneScale(
+            self,
+            label="Confidence",
+            init=consts.CONFIDENCE_DEFAULT,
+            command=command,
+        )
+        self._confidence.pack()
+
+        self._iou = ZeroToOneScale(
+            self,
+            label="IoU",
+            init=consts.IOU_DEFAULT,
+            command=command,
+        )
+        self._iou.pack()
+
+        self._augment = tkinter.BooleanVar(value=False)
+        ttk.Checkbutton(
+            self,
+            text="Enable augmentation on inference",
+            variable=self._augment,
+            command=self._button_command,
+        ).pack()
+
+    def get(self) -> ModelParam:
+        return ModelParam(self._confidence.get(), self._iou.get(), self._augment.get())
+
+    def set(self, confidence: float, iou: float, augment: bool) -> None:
+        self._confidence.set(confidence)
+        self._iou.set(iou)
+        self._augment.set(augment)
+
+    def from_param(self, param: ModelParam) -> None:
+        self.set(param.confidence, param.iou, param.augment)
+
+    def _button_command(self) -> None:
+        if self._command is not None:
+            self._command()
+
+
+class RenderConfig(ttk.Frame):
+    # Tk widgets
+    _load_mask_button: LoadFileButton
+    _mask_border_config: LineConfig
+    _mask_thres: ZeroToOneScale
+    _bb_config: LineConfig
+    _outsider_config: LineConfig
+
+    # Tk variables
+    _show_mask_border: tkinter.BooleanVar
+    _show_outsiders: tkinter.BooleanVar
+    _show_confidence: tkinter.BooleanVar
+
+    # volatile variables (don't save to config)
+    _enable_mask: tkinter.BooleanVar
+    _show_filename: tkinter.BooleanVar
+
+    proxy: Proxy
+
+    class Proxy:
+        control: YoloV5InteractiveViewer
+
+        def __init__(self, control: YoloV5InteractiveViewer) -> None:
+            self.control = control
+
+        def load_mask(self, filename: str) -> None:
+            self.control.load_mask(filename)
+
+    @dataclass
+    class Param:
+        bb_params: LineParam
+        outsider_params: LineParam
+        mask_border_params: LineParam
+        mask_thres: float
+        show_mask_border: bool
+        show_outsiders: bool
+        show_confidence: bool
+
+    def __init__(self, root: tkinter.Misc, control: YoloV5InteractiveViewer) -> None:
+        ttk.Frame.__init__(self, root)
+        self.proxy = self.Proxy(control)
+
+        # mask config
+        mask_config_frame = ttk.LabelFrame(self, text="Mask")
+
+        self._enable_mask = tkinter.BooleanVar(value=False)
+        ttk.Checkbutton(
+            mask_config_frame,
+            text="Apply mask as postprocess",
+            variable=self._enable_mask,
+        ).pack()
+
+        self._load_mask_button = LoadFileButton(
+            mask_config_frame,
+            "Load mask",
+            command=self.load_mask,
+        )
+        self._load_mask_button.pack()
+
+        self._show_mask_border = tkinter.BooleanVar(value=True)
+        ttk.Checkbutton(
+            mask_config_frame,
+            text="Show borders of the mask",
+            variable=self._show_mask_border,
+        ).pack()
+
+        self._mask_border_config = LineConfig(
+            mask_config_frame,
+            color=consts.BOUNDS_COLOR_DEFAULT,
+            width=consts.BOUNDS_WIDTH_DEFAULT,
+        )
+        self._mask_border_config.pack()
+
+        self._mask_thres = ZeroToOneScale(
+            mask_config_frame,
+            label="Threshold",
+            init=consts.MASK_THRES_DEFAULT,
+        )
+        self._mask_thres.pack()
+
+        mask_config_frame.pack()
+
+        # bb config
+        bb_config_frame = ttk.LabelFrame(self, text="Bounding boxes")
+        self._bb_config = LineConfig(
+            bb_config_frame,
+            color=consts.BBOXES_COLOR_DEFAULT,
+            width=consts.BBOXES_WIDTH_DEFAULT,
+        )
+        self._bb_config.pack()
+        bb_config_frame.pack()
+
+        # outsider config
+        outsider_config_frame = ttk.LabelFrame(self, text="Outsiders")
+
+        self._show_outsiders = tkinter.BooleanVar(value=False)
+        ttk.Checkbutton(
+            outsider_config_frame,
+            text="Show outsiders",
+            variable=self._show_outsiders,
+        ).pack()
+
+        self._outsider_config = LineConfig(
+            outsider_config_frame,
+            color=consts.OUTSIDER_COLOR_DEFAULT,
+            width=consts.OUTSIDER_WIDTH_DEFAULT,
+        )
+        self._outsider_config.pack()
+        outsider_config_frame.pack()
+
+        # misc.
+        misc_frame = ttk.LabelFrame(self, text="Misc")
+        misc_frame.pack()
+
+        self._show_confidence = tkinter.BooleanVar(value=False)
+        ttk.Checkbutton(
+            misc_frame,
+            text="Show confidence with bounding boxes",
+            variable=self._show_confidence,
+        ).pack()
+
+        self._show_filename = tkinter.BooleanVar(value=False)
+        ttk.Checkbutton(
+            misc_frame,
+            text="Show filename in the picture",
+            variable=self._show_filename,
+        ).pack()
+
+    def get_param(self) -> Param:
+        return self.Param(
+            bb_params=self._bb_config.get(),
+            outsider_params=self._outsider_config.get(),
+            mask_border_params=self._mask_border_config.get(),
+            mask_thres=self._mask_thres.get(),
+            show_mask_border=self._show_mask_border.get(),
+            show_outsiders=self._show_outsiders.get(),
+            show_confidence=self._show_confidence.get(),
+        )
+
+    def from_param(self, param: Param) -> None:
+        self._bb_config.from_param(param.bb_params)
+        self._outsider_config.from_param(param.outsider_params)
+        self._mask_border_config.from_param(param.mask_border_params)
+        self._mask_thres.set(param.mask_thres)
+        self._show_mask_border.set(param.show_mask_border)
+        self._show_outsiders.set(param.show_outsiders)
+        self._show_confidence.set(param.show_confidence)
+
+    def is_filename_shown(self) -> bool:
+        return self._show_filename.get()
+
+    def is_mask_on(self) -> bool:
+        return self._enable_mask.get()
+
+    def turn_mask_on(self) -> None:
+        return self._enable_mask.set(True)
+
+    def set_mask_filename(self, filename: str) -> None:
+        self._load_mask_button.set_filename(filename)
 
     def load_mask(self) -> None:
         filename = filedialog.askopenfilename(title="Choose Mask")
@@ -597,55 +764,6 @@ class RightSidebar(ttk.Frame):
             # canceled
             return
         self.proxy.load_mask(filename)
-
-    def get_config(self) -> AppConfig | None:
-        bb_params = self.bb_config.get()
-        outsider_params = self.outsider_config.get()
-        mask_border_params = self.mask_border_config.get()
-        model_param = self.model_param_control.get()
-
-        return AppConfig(
-            confidence=model_param.confidence,
-            iou=model_param.iou,
-            augment=model_param.augment,
-            bb_color=bb_params.color,
-            bb_width=bb_params.width,
-            show_outsiders=self.show_outsiders.get(),
-            outsider_color=outsider_params.color,
-            outsider_width=outsider_params.width,
-            mask_thres=self.mask_thres.get(),
-            show_mask_border=self.show_mask_border.get(),
-            mask_border_color=mask_border_params.color,
-            mask_border_width=mask_border_params.width,
-            show_confidence=self.show_confidence.get(),
-        )
-
-    def from_config(self, app_config: AppConfig) -> None:
-        self.model_param_control.set(
-            app_config.confidence,
-            app_config.iou,
-            app_config.augment,
-        )
-
-        self.bb_config.set(
-            color=logic.rgb2hex(app_config.bb_color),
-            width=app_config.bb_width,
-        )
-
-        self.show_outsiders.set(app_config.show_outsiders)
-        self.outsider_config.set(
-            color=logic.rgb2hex(app_config.outsider_color),
-            width=app_config.outsider_width,
-        )
-
-        self.mask_thres.set(app_config.mask_thres)
-        self.show_mask_border.set(app_config.show_mask_border)
-        self.mask_border_config.set(
-            color=logic.rgb2hex(app_config.mask_border_color),
-            width=app_config.mask_border_width,
-        )
-
-        self.show_confidence.set(app_config.show_confidence)
 
 
 if __name__ == "__main__":
@@ -657,7 +775,7 @@ if __name__ == "__main__":
     root.columnconfigure(0, weight=1)
     root.rowconfigure(0, weight=1)
 
-    init_config = None
+    init_config: ViewerInitConfig | None = None
     if Path("init.json").is_file():
         try:
             with Path("init.json").open() as f:

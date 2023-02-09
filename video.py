@@ -73,7 +73,6 @@ def run(
         # There may be a better cap with hardware acceleration, but I don't know about the other platforms...
         cv2_api_preference = cv2.CAP_ANY
 
-
     print(f'[I] Open source "{src_path}"')
     reader = cv2.VideoCapture(src_path, apiPreference=cv2_api_preference)
 

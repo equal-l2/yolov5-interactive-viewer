@@ -4,6 +4,7 @@ from tkinter import colorchooser, ttk
 
 from PIL import ImageColor
 
+from logic import rgb2hex
 from structs import LineParam, RgbTuple
 
 TkCommand = typing.Callable[[], None] | None
@@ -41,6 +42,10 @@ class LineConfig(ttk.Frame):
     def set(self, color: str, width: int) -> None:
         self.colorpicker.set(color)
         self.width_scale.set(width)
+
+    def from_param(self, param: LineParam) -> None:
+        color_str = rgb2hex(param.color)
+        self.set(color_str, param.width)
 
 
 class ColorPicker(ttk.Frame):
