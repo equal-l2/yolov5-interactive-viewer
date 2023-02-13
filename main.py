@@ -282,15 +282,28 @@ class LeftSidebar(ttk.Frame):
         ttk.Button(self, text="Load folder", command=self.load_folder).pack()
 
         # file list
+        file_list_frame = ttk.Frame(self)
+        file_list_frame.pack()
+        file_list_frame.grid_rowconfigure(0, weight=1)
+        file_list_frame.grid_columnconfigure(0, weight=1)
+
         def on_list_selected(_: typing.Any) -> None:
             select = self.file_list.curselection()
             if len(select) < 1:
                 return
             self.proxy.update_image_index(select[0])
 
-        self.file_list = tkinter.Listbox(self, height=10)
-        self.file_list.pack()
+        self.file_list = tkinter.Listbox(file_list_frame, height=30)
+        self.file_list.grid(row=0, column=0, sticky=tkinter.NSEW)
         self.file_list.bind("<<ListboxSelect>>", on_list_selected)
+
+        sb = ttk.Scrollbar(
+            file_list_frame,
+            orient=tkinter.VERTICAL,
+            command=self.file_list.yview,
+        )
+        sb.grid(row=0, column=1, sticky=tkinter.NS)
+        self.file_list.configure(yscrollcommand=sb.set)
 
         # next/prev button
         def modify_index(delta: int) -> None:
@@ -408,18 +421,20 @@ class RightSidebar(ttk.Frame):
         self._model_config = ModelConfig(self, control)
         self._model_config.pack()
 
+        ttk.Button(
+            self,
+            text="Re-run Detection",
+            command=self.proxy.run_detect,
+        ).pack()
+
+        ttk.Separator(self, orient=tkinter.HORIZONTAL).pack()
+
         self._render_config = RenderConfig(
             self,
             control,
             command=self.proxy.render_result,
         )
         self._render_config.pack()
-
-        ttk.Button(
-            self,
-            text="Re-run Detection",
-            command=self.proxy.run_detect,
-        ).pack()
 
     def import_config(self) -> None:
         filename = filedialog.askopenfilename(
@@ -578,7 +593,7 @@ class ModelParamControl(ttk.Frame):
 
         self._confidence = ZeroToOneScale(
             self,
-            label="Confidence",
+            label="Conf",
             init=consts.CONFIDENCE_DEFAULT,
             command=command,
         )
@@ -703,7 +718,7 @@ class RenderConfig(ttk.Frame):
 
         self._mask_thres = ZeroToOneScale(
             mask_config_frame,
-            label="Threshold",
+            label="Thres",
             init=consts.MASK_THRES_DEFAULT,
             command=command,
         )
@@ -749,7 +764,7 @@ class RenderConfig(ttk.Frame):
         self._show_confidence = tkinter.BooleanVar(value=False)
         ttk.Checkbutton(
             misc_frame,
-            text="Show confidence with bounding boxes",
+            text="Show confidence value",
             variable=self._show_confidence,
             command=self._run_command,
         ).pack()
@@ -757,7 +772,7 @@ class RenderConfig(ttk.Frame):
         self._show_filename = tkinter.BooleanVar(value=False)
         ttk.Checkbutton(
             misc_frame,
-            text="Show filename in the picture",
+            text="Show filename",
             variable=self._show_filename,
             command=self._run_command,
         ).pack()

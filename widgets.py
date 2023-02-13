@@ -22,7 +22,7 @@ class LineConfig(ttk.Frame):
 
         self.width_scale = LineWidthScale(
             self,
-            label="Line Width",
+            label="Width",
             init=width,
             command=command,
         )
@@ -30,7 +30,7 @@ class LineConfig(ttk.Frame):
 
         self.colorpicker = ColorPicker(
             self,
-            text="Line color",
+            text="Color",
             color=color,
             command=command,
         )
@@ -94,7 +94,8 @@ class ColorPicker(ttk.Frame):
         self._set_color(color)
 
 
-class ZeroToOneScale(tkinter.Scale):
+class ZeroToOneScale(ttk.Frame):
+    scale: tkinter.Scale
     command: TkCommand
 
     def __init__(
@@ -104,25 +105,35 @@ class ZeroToOneScale(tkinter.Scale):
         init: float,
         command: TkCommand = None,
     ) -> None:
+        ttk.Frame.__init__(self, root)
+
         self.command = command
-        tkinter.Scale.__init__(
+
+        ttk.Label(self, text=label).grid(row=0, column=0)
+        self.scale = tkinter.Scale(
             self,
-            root,
             from_=0,
             to=1.0,
             resolution=0.01,
-            label=label,
             orient=tkinter.HORIZONTAL,
             command=self._run_command,
         )
+        self.scale.grid(row=0, column=1)
         self.set(init)
 
     def _run_command(self, _: str) -> None:
         if self.command is not None:
             self.command()
 
+    def set(self, value: float) -> None:
+        self.scale.set(value)
 
-class LineWidthScale(tkinter.Scale):
+    def get(self) -> float:
+        return self.scale.get()
+
+
+class LineWidthScale(ttk.Frame):
+    scale: tkinter.Scale
     command: TkCommand
 
     def __init__(
@@ -134,22 +145,27 @@ class LineWidthScale(tkinter.Scale):
     ) -> None:
         from consts import LINE_WIDTH_MAX, LINE_WIDTH_MIN
 
+        ttk.Frame.__init__(self, root)
+
         self.command = command
 
-        tkinter.Scale.__init__(
+        ttk.Label(self, text=label).grid(row=0, column=0)
+        self.scale = tkinter.Scale(
             self,
-            root,
             from_=LINE_WIDTH_MIN,
             to=LINE_WIDTH_MAX,
             resolution=1,
-            label=label,
             orient=tkinter.HORIZONTAL,
             command=self._run_command,
         )
+        self.scale.grid(row=0, column=1)
         self.set(init)
 
+    def set(self, value: int) -> None:
+        self.scale.set(value)
+
     def get(self) -> int:
-        return int(super().get())
+        return int(self.scale.get())
 
     def _run_command(self, _: str) -> None:
         if self.command is not None:
