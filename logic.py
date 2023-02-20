@@ -4,18 +4,48 @@ from typing import TYPE_CHECKING, Any, Final
 
 import cv2
 import numpy
-
-from consts import IMG_SIZE
+from yolov5.helpers import load_model
 
 if TYPE_CHECKING:
     from typing import TypeAlias
 
-    from consts import MODEL_TYPE
-    from structs import AppConfig, RgbTuple
+    from yolov5.models.common import AutoShape
+
+    from structs import DetectConfig, RenderConfig, RgbTuple
 
     Cv2Image: TypeAlias = cv2.Mat
-    DetectValues: TypeAlias = Any
+    Detection: TypeAlias = Any
     BBoxXyxy: TypeAlias = tuple[tuple[int, int], tuple[int, int]]
+
+    # the model type may change, as it is an internal type taken from the current implementation of yolov5
+    MODEL_TYPE: TypeAlias = AutoShape
+
+
+class Model:
+    model: MODEL_TYPE
+
+    def __init__(self, model_path: str) -> None:
+        self.model = load_model(model_path)
+
+    def run(
+        self,
+        cv2_image: Cv2Image,
+        config: DetectConfig,
+    ) -> Detection:
+        from consts import IMG_SIZE
+
+        self.model.conf = config.confidence
+        self.model.iou = config.iou
+        detected = self.model(cv2_image, size=IMG_SIZE, augment=config.augment)
+
+        values = detected.pandas().xyxy[0]
+
+        # coords in dataframe are float, so they need to be cast into int
+        # (because cv2 accepts int coords only)
+        values.round(0)
+        values = values.astype({"xmin": int, "ymin": int, "xmax": int, "ymax": int})
+
+        return values
 
 
 class Mask:
@@ -38,26 +68,6 @@ class Mask:
         self.contours = contours
 
 
-def run_detect(
-    model: MODEL_TYPE,
-    cv2_image: Cv2Image,
-    config: AppConfig,
-) -> DetectValues:
-    """Run detection on `cv2_image` using the model from `model`."""
-    model.conf = config.confidence
-    model.iou = config.iou
-    detected = model(cv2_image, size=IMG_SIZE, augment=config.augment)
-
-    values = detected.pandas().xyxy[0]
-
-    # coords in dataframe are float, so they need to be cast into int
-    # (because cv2 accepts int coords only)
-    values.round(0)
-    values = values.astype({"xmin": int, "ymin": int, "xmax": int, "ymax": int})
-
-    return values
-
-
 def compute_intersect(box1: BBoxXyxy, box2: BBoxXyxy) -> int:
     """Compute the area of intersect between `box1` and `box2`"""
     max_of_x_min = max(box1[0][0], box2[0][0])
@@ -71,25 +81,26 @@ def compute_intersect(box1: BBoxXyxy, box2: BBoxXyxy) -> int:
     return intersect
 
 
-def draw_result(
-    values: DetectValues,
+def render_result(
+    values: Detection,
     cv2_image: Cv2Image,
     filename: str | None,
     mask: Mask | None,
     text_color: RgbTuple,
-    config: AppConfig,
+    config: RenderConfig,
 ) -> None:
     """Read detection results from `values` and draw them to `cv2_image` (destructive)
     filename: if not None, the filename will be rendered on the image
     mask: if not None, mask will be considered for bounding box elimination
     """
     if mask is not None and config.show_mask_border:
+        mask_border = config.mask_border_config
         cv2.drawContours(
             cv2_image,
             mask.contours,
             -1,
-            config.mask_border_color,
-            thickness=config.mask_border_width,
+            mask_border.color,
+            thickness=mask_border.width,
         )
 
     if filename is not None:
@@ -120,8 +131,7 @@ def draw_result(
             if mask_intersect_ratio < config.mask_thres:
                 is_outsider = True
 
-        box_color = config.outsider_color if is_outsider else config.bb_color
-        box_width = config.outsider_width if is_outsider else config.bb_width
+        box_params = config.outsider_config if is_outsider else config.bb_config
 
         show_detect = config.show_outsiders or not is_outsider
 
@@ -130,8 +140,8 @@ def draw_result(
                 cv2_image,
                 (row.xmin, row.ymin),
                 (row.xmax, row.ymax),
-                box_color,
-                box_width,
+                box_params.color,
+                box_params.width,
             )
             if config.show_confidence:
                 cv2.putText(

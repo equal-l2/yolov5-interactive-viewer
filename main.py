@@ -6,7 +6,6 @@ import os
 import tkinter
 import traceback
 import typing
-from dataclasses import dataclass
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -15,18 +14,18 @@ from PIL import Image, ImageTk
 
 import consts
 import logic
-from structs import AppConfig, ModelParam, ViewerInitConfig
-from widgets import LineConfig, LineParam, LoadFileButton, TkCommand, ZeroToOneScale
+from structs import AppConfig, DetectConfig, RenderConfig, ViewerInitConfig
+from widgets import LineConfigControl, LoadFileButton, TkCommand, ZeroToOneScale
 
 
 class YoloV5InteractiveViewer(ttk.Frame):
     # internal states
-    model: consts.MODEL_TYPE | None = None
+    model: logic.Model | None = None
     image_index: int = 0
     mask: logic.Mask | None = None
     cv2_image: logic.Cv2Image | None = None
     pil_image: Image.Image | None = None
-    values: logic.DetectValues | None = None
+    values: logic.Detection | None = None
 
     # tk objects
     left_sidebar: LeftSidebar
@@ -145,11 +144,9 @@ class YoloV5InteractiveViewer(ttk.Frame):
             self.image_view.create_image(0, 0, image=self.tk_image, anchor="nw")
 
     def load_model(self, filename: str) -> None:
-        from yolov5.helpers import load_model
-
         print(f"Load model {filename}")
         try:
-            self.model = load_model(filename)
+            self.model = logic.Model(filename)
         except:
             traceback.print_exc()
             messagebox.showerror(message="Failed to load the model")
@@ -193,7 +190,7 @@ class YoloV5InteractiveViewer(ttk.Frame):
             return
         cv2.cvtColor(self.cv2_image, cv2.COLOR_BGR2RGB, dst=self.cv2_image)
 
-        values = logic.run_detect(self.model, self.cv2_image, config)
+        values = self.model.run(self.cv2_image, config.detect)
 
         self.values = values  # noqa: PD011
         self.render_result()
@@ -236,13 +233,13 @@ class YoloV5InteractiveViewer(ttk.Frame):
             return
 
         image_copied = self.cv2_image.copy()
-        logic.draw_result(
+        logic.render_result(
             values=self.values,
             cv2_image=image_copied,
             filename=filename,
             mask=self.mask if enable_mask else None,
             text_color=consts.TEXT_COLOR,
-            config=config,
+            config=config.render,
         )
 
         self.pil_image = Image.fromarray(image_copied)
@@ -381,7 +378,7 @@ class LeftSidebar(ttk.Frame):
 
 class RightSidebar(ttk.Frame):
     _model_config: ModelConfig
-    _render_config: RenderConfig
+    _render_config: RenderConfigControl
 
     proxy: Proxy
 
@@ -429,7 +426,7 @@ class RightSidebar(ttk.Frame):
 
         ttk.Separator(self, orient=tkinter.HORIZONTAL).pack()
 
-        self._render_config = RenderConfig(
+        self._render_config = RenderConfigControl(
             self,
             control,
             command=self.proxy.render_result,
@@ -456,50 +453,14 @@ class RightSidebar(ttk.Frame):
         self.proxy.export_config(filename)
 
     def get_config(self) -> AppConfig | None:
-        render_params = self._render_config.get_param()
-        model_param = self._model_config.get_param()
+        render_config = self._render_config.get_config()
+        model_config = self._model_config.get_config()
 
-        return AppConfig(
-            confidence=model_param.confidence,
-            iou=model_param.iou,
-            augment=model_param.augment,
-            bb_color=render_params.bb_params.color,
-            bb_width=render_params.bb_params.width,
-            show_outsiders=render_params.show_outsiders,
-            outsider_color=render_params.outsider_params.color,
-            outsider_width=render_params.outsider_params.width,
-            mask_thres=render_params.mask_thres,
-            show_mask_border=render_params.show_mask_border,
-            mask_border_color=render_params.mask_border_params.color,
-            mask_border_width=render_params.mask_border_params.width,
-            show_confidence=render_params.show_confidence,
-        )
+        return AppConfig(detect=model_config, render=render_config)
 
-    def from_config(self, app_config: AppConfig) -> None:
-        self._model_config.from_param(
-            ModelParam(
-                confidence=app_config.confidence,
-                iou=app_config.iou,
-                augment=app_config.augment,
-            ),
-        )
-
-        render_params = RenderConfig.Param(
-            bb_params=LineParam(app_config.bb_color, app_config.bb_width),
-            outsider_params=LineParam(
-                app_config.outsider_color,
-                app_config.outsider_width,
-            ),
-            mask_border_params=LineParam(
-                app_config.mask_border_color,
-                app_config.mask_border_width,
-            ),
-            mask_thres=app_config.mask_thres,
-            show_mask_border=app_config.show_mask_border,
-            show_outsiders=app_config.show_outsiders,
-            show_confidence=app_config.show_confidence,
-        )
-        self._render_config.from_param(render_params)
+    def from_config(self, config: AppConfig) -> None:
+        self._model_config.from_config(config.detect)
+        self._render_config.from_config(config.render)
 
     def is_filename_shown(self) -> bool:
         return self._render_config.is_filename_shown()
@@ -519,7 +480,7 @@ class RightSidebar(ttk.Frame):
 
 class ModelConfig(ttk.Frame):
     _load_model_button: LoadFileButton
-    _model_param_control: ModelParamControl
+    _detect_config_control: DetectConfigControl
 
     _proxy: Proxy
 
@@ -556,8 +517,8 @@ class ModelConfig(ttk.Frame):
         )
         self._load_model_button.pack()
 
-        self._model_param_control = ModelParamControl(model_config, command=command)
-        self._model_param_control.pack()
+        self._detect_config_control = DetectConfigControl(model_config, command=command)
+        self._detect_config_control.pack()
 
     def load_model(self) -> None:
         filename = filedialog.askopenfilename(title="Choose Model")
@@ -569,17 +530,17 @@ class ModelConfig(ttk.Frame):
         if self.command is not None:
             self.command()
 
-    def get_param(self) -> ModelParam:
-        return self._model_param_control.get()
+    def get_config(self) -> DetectConfig:
+        return self._detect_config_control.get()
 
-    def from_param(self, param: ModelParam) -> None:
-        self._model_param_control.from_param(param)
+    def from_config(self, config: DetectConfig) -> None:
+        self._detect_config_control.from_config(config)
 
     def set_model_filename(self, filename: str) -> None:
         self._load_model_button.set_filename(filename)
 
 
-class ModelParamControl(ttk.Frame):
+class DetectConfigControl(ttk.Frame):
     _confidence: ZeroToOneScale
     _iou: ZeroToOneScale
     _augment: tkinter.BooleanVar
@@ -615,29 +576,33 @@ class ModelParamControl(ttk.Frame):
             command=self._button_command,
         ).pack()
 
-    def get(self) -> ModelParam:
-        return ModelParam(self._confidence.get(), self._iou.get(), self._augment.get())
+    def get(self) -> DetectConfig:
+        return DetectConfig(
+            confidence=self._confidence.get(),
+            iou=self._iou.get(),
+            augment=self._augment.get(),
+        )
 
     def set(self, confidence: float, iou: float, augment: bool) -> None:
         self._confidence.set(confidence)
         self._iou.set(iou)
         self._augment.set(augment)
 
-    def from_param(self, param: ModelParam) -> None:
-        self.set(param.confidence, param.iou, param.augment)
+    def from_config(self, config: DetectConfig) -> None:
+        self.set(config.confidence, config.iou, config.augment)
 
     def _button_command(self) -> None:
         if self._command is not None:
             self._command()
 
 
-class RenderConfig(ttk.Frame):
+class RenderConfigControl(ttk.Frame):
     # Tk widgets
     _load_mask_button: LoadFileButton
-    _mask_border_config: LineConfig
+    _mask_border_config: LineConfigControl
     _mask_thres: ZeroToOneScale
-    _bb_config: LineConfig
-    _outsider_config: LineConfig
+    _bb_config: LineConfigControl
+    _outsider_config: LineConfigControl
 
     # Tk variables
     _show_mask_border: tkinter.BooleanVar
@@ -660,16 +625,6 @@ class RenderConfig(ttk.Frame):
             self.control.load_mask(filename)
 
     _command: TkCommand
-
-    @dataclass
-    class Param:
-        bb_params: LineParam
-        outsider_params: LineParam
-        mask_border_params: LineParam
-        mask_thres: float
-        show_mask_border: bool
-        show_outsiders: bool
-        show_confidence: bool
 
     def __init__(
         self,
@@ -708,7 +663,7 @@ class RenderConfig(ttk.Frame):
             command=self._run_command,
         ).pack()
 
-        self._mask_border_config = LineConfig(
+        self._mask_border_config = LineConfigControl(
             mask_config_frame,
             color=consts.BOUNDS_COLOR_DEFAULT,
             width=consts.BOUNDS_WIDTH_DEFAULT,
@@ -728,7 +683,7 @@ class RenderConfig(ttk.Frame):
 
         # bb config
         bb_config_frame = ttk.LabelFrame(self, text="Bounding boxes")
-        self._bb_config = LineConfig(
+        self._bb_config = LineConfigControl(
             bb_config_frame,
             color=consts.BBOXES_COLOR_DEFAULT,
             width=consts.BBOXES_WIDTH_DEFAULT,
@@ -748,7 +703,7 @@ class RenderConfig(ttk.Frame):
             command=self._run_command,
         ).pack()
 
-        self._outsider_config = LineConfig(
+        self._outsider_config = LineConfigControl(
             outsider_config_frame,
             color=consts.OUTSIDER_COLOR_DEFAULT,
             width=consts.OUTSIDER_WIDTH_DEFAULT,
@@ -781,25 +736,25 @@ class RenderConfig(ttk.Frame):
         if self.command is not None:
             self.command()
 
-    def get_param(self) -> Param:
-        return self.Param(
-            bb_params=self._bb_config.get(),
-            outsider_params=self._outsider_config.get(),
-            mask_border_params=self._mask_border_config.get(),
+    def get_config(self) -> RenderConfig:
+        return RenderConfig(
+            bb_config=self._bb_config.get(),
+            outsider_config=self._outsider_config.get(),
+            mask_border_config=self._mask_border_config.get(),
             mask_thres=self._mask_thres.get(),
             show_mask_border=self._show_mask_border.get(),
             show_outsiders=self._show_outsiders.get(),
             show_confidence=self._show_confidence.get(),
         )
 
-    def from_param(self, param: Param) -> None:
-        self._bb_config.from_param(param.bb_params)
-        self._outsider_config.from_param(param.outsider_params)
-        self._mask_border_config.from_param(param.mask_border_params)
-        self._mask_thres.set(param.mask_thres)
-        self._show_mask_border.set(param.show_mask_border)
-        self._show_outsiders.set(param.show_outsiders)
-        self._show_confidence.set(param.show_confidence)
+    def from_config(self, config: RenderConfig) -> None:
+        self._bb_config.from_config(config.bb_config)
+        self._outsider_config.from_config(config.outsider_config)
+        self._mask_border_config.from_config(config.mask_border_config)
+        self._mask_thres.set(config.mask_thres)
+        self._show_mask_border.set(config.show_mask_border)
+        self._show_outsiders.set(config.show_outsiders)
+        self._show_confidence.set(config.show_confidence)
 
     def is_filename_shown(self) -> bool:
         return self._show_filename.get()
@@ -827,10 +782,12 @@ if __name__ == "__main__":
     root = tkinter.Tk()
     root.geometry("1600x1000")
     root.title("YOLOv5 Interactive Viewer")
-    # configureしないと伸びない
+
+    # configureしないと中身がウィンドウに合わせて伸びない
     root.columnconfigure(0, weight=1)
     root.rowconfigure(0, weight=1)
 
+    # init.json 読み込み
     init_config: ViewerInitConfig | None = None
     if Path("init.json").is_file():
         try:
