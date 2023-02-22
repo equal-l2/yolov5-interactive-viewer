@@ -663,14 +663,6 @@ class RenderConfigControl(ttk.Frame):
             command=self._run_command,
         ).pack()
 
-        self._mask_border_config = LineConfigControl(
-            mask_config_frame,
-            color=consts.BOUNDS_COLOR_DEFAULT,
-            width=consts.BOUNDS_WIDTH_DEFAULT,
-            command=command,
-        )
-        self._mask_border_config.pack()
-
         self._mask_thres = ZeroToOneScale(
             mask_config_frame,
             label="Thres",
@@ -678,6 +670,14 @@ class RenderConfigControl(ttk.Frame):
             command=command,
         )
         self._mask_thres.pack()
+
+        self._mask_border_config = LineConfigControl(
+            mask_config_frame,
+            color=consts.BOUNDS_COLOR_DEFAULT,
+            width=consts.BOUNDS_WIDTH_DEFAULT,
+            command=command,
+        )
+        self._mask_border_config.pack()
 
         mask_config_frame.pack()
 
