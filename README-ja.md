@@ -1,5 +1,7 @@
 # YOLOv5 Interactive Viewer
 
+![screenshot](./assets/screenshot.png)
+
 ## 使用用途
 「1クラスのみを検出するモデル」を一つ使い、大量の画像に対して次々検出をして目視で確認したい
 

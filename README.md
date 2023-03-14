@@ -1,5 +1,7 @@
 # YOLOv5 Interactive Viewer
 
+![screenshot](./assets/screenshot.png)
+
 ## Usecase
 Run detection on multiple images with a single model (which does single class detection) and view the result
 
